@@ -1,65 +1,100 @@
-"""ai_werewolf — an LLM werewolf engine (AI狼人杀).
+"""ai_werewolf — AI狼人杀: a werewolf engine for human vs AI multi-agent play.
 
-ai_werewolf does two things with the game of Werewolf (Mafia):
-
-* **self-play arena** — LLM agents play each other so you can benchmark how
-  well a model reasons, deceives and deduces under hidden information;
-* **human copilot** — an explainable advisor that estimates who the werewolves
-  are and recommends your vote while *you* play.
-
-It is an independent project derived from `deepwolf
-<https://github.com/JuneQQQ/deepwolf>`_ (see the LICENSE for attribution). The
-public API is re-exported here; see the README for usage.
+The public API is re-exported here. See the README for the product overview
+and the architecture document for how the layers fit together.
 """
 
-from ai_werewolf.agents.base import Agent
-from ai_werewolf.agents.human_agent import HumanAgent
-from ai_werewolf.agents.llm_agent import LLMAgent
-from ai_werewolf.agents.random_agent import RandomAgent
-from ai_werewolf.arena.leaderboard import Leaderboard, LeaderboardReport
-from ai_werewolf.arena.runner import Arena, ArenaReport
+from ai_werewolf.ai.mock import MockProvider
+from ai_werewolf.ai.provider import (
+    PRESETS,
+    ModelConfig,
+    OpenAICompatProvider,
+    Prompt,
+    Provider,
+    ProviderError,
+)
+from ai_werewolf.benchmark import ArenaReport, run_arena
 from ai_werewolf.copilot.advisor import Advice, Suspicion, advise
 from ai_werewolf.copilot.calibration import CalibrationReport, evaluate_copilot
-from ai_werewolf.game.engine import GameEngine
-from ai_werewolf.game.roles import Faction, Role
-from ai_werewolf.game.state import GameConfig, GameResult, PlayerView
-from ai_werewolf.i18n import LANGUAGES, Translator
-from ai_werewolf.llm.mock import MockProvider
-from ai_werewolf.llm.provider import (
-    LLMConfig,
-    LLMError,
-    LLMProvider,
-    OpenAICompatProvider,
+from ai_werewolf.domain.actions import Action, ActionKind
+from ai_werewolf.domain.events import EventKind, GameEvent
+from ai_werewolf.domain.referee import GamePhase, Referee
+from ai_werewolf.domain.roles import Faction, Role, build_roster
+from ai_werewolf.domain.state import (
+    DecisionRequest,
+    GameConfig,
+    GameState,
+    PlayerView,
+    Seat,
+    build_view,
 )
+from ai_werewolf.players.human import HumanPlayer
+from ai_werewolf.players.llm_bot import LLMBot
+from ai_werewolf.players.random_bot import RandomBot
+from ai_werewolf.replay.recorder import (
+    SCHEMA,
+    load,
+    record_game,
+    record_session,
+    replay_text,
+    save,
+)
+from ai_werewolf.server.admin import AdminBackend, ServerStats
+from ai_werewolf.server.matchmaking import Matchmaker
+from ai_werewolf.server.room import AIConfig, Room, RoomConfig, RoomStatus
+from ai_werewolf.server.session import GameSession
+from ai_werewolf.stats.ledger import PlayerRecord, StatsLedger
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
-    "Agent",
-    "HumanAgent",
-    "LLMAgent",
-    "RandomAgent",
-    "Arena",
+    "MockProvider",
+    "PRESETS",
+    "ModelConfig",
+    "OpenAICompatProvider",
+    "Prompt",
+    "Provider",
+    "ProviderError",
     "ArenaReport",
-    "Leaderboard",
-    "LeaderboardReport",
+    "run_arena",
     "Advice",
     "Suspicion",
     "advise",
     "CalibrationReport",
     "evaluate_copilot",
-    "GameEngine",
+    "Action",
+    "ActionKind",
+    "EventKind",
+    "GameEvent",
+    "GamePhase",
+    "Referee",
     "Faction",
     "Role",
+    "build_roster",
+    "DecisionRequest",
     "GameConfig",
-    "GameResult",
+    "GameState",
     "PlayerView",
-    "LANGUAGES",
-    "Translator",
-    "MockProvider",
-    "LLMConfig",
-    "LLMError",
-    "LLMProvider",
-    "OpenAICompatProvider",
+    "Seat",
+    "build_view",
+    "HumanPlayer",
+    "LLMBot",
+    "RandomBot",
+    "SCHEMA",
+    "load",
+    "record_game",
+    "record_session",
+    "replay_text",
+    "save",
+    "AdminBackend",
+    "ServerStats",
+    "Matchmaker",
+    "AIConfig",
+    "Room",
+    "RoomConfig",
+    "RoomStatus",
+    "GameSession",
+    "PlayerRecord",
+    "StatsLedger",
     "__version__",
 ]

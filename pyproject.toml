@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-werewolf"
-version = "0.1.0"
-description = "AI狼人杀 — an LLM werewolf engine: agent self-play arena and an explainable human copilot."
+version = "0.2.0"
+description = "AI狼人杀 — 面向真人与 AI 多智能体对战的狼人杀引擎（房间、匹配、裁判状态机、Copilot、观战回放、战绩与后台）。"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "AI狼人杀 contributors" }]
-keywords = ["werewolf", "mafia", "llm", "agents", "social-deduction", "benchmark", "game-ai"]
+keywords = ["werewolf", "mafia", "llm", "agents", "multi-agent", "social-deduction", "game-server"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -32,6 +32,10 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
+]
+server = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
 ]
 
 [project.urls]

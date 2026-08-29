@@ -12,11 +12,17 @@ def test_simulate_command_runs():
 
 
 def test_arena_command_runs():
-    assert main(["arena", "--games", "3", "--players", "7", "--villagers", "random"]) == 0
+    assert main(["arena", "--games", "3", "--players", "7", "--bots", "random"]) == 0
 
 
-def test_leaderboard_command_runs():
-    assert main(["leaderboard", "--games", "3", "--players", "7"]) == 0
+def test_calibrate_command_runs():
+    assert main(["calibrate", "--games", "3", "--players", "7"]) == 0
+
+
+def test_replay_command_runs(tmp_path):
+    path = tmp_path / "g.json"
+    assert main(["simulate", "--players", "5", "--seed", "1", "--transcript", str(path)]) == 0
+    assert main(["replay", str(path)]) == 0
 
 
 def test_unknown_provider_is_reported(capsys):

@@ -1,27 +1,33 @@
 # Changelog
 
-All notable changes to AI狼人杀 (ai-werewolf) are documented in this file.
+All notable changes to AI狼人杀 (ai-werewolf) are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-01-01
+## [0.2.0] - 2026-01-01
+
+### Changed
+
+- **Independent rewrite.** The previous 0.1.x code was a port of deepwolf; it
+  has been removed and replaced by an original architecture designed around
+  human-vs-AI multiplayer play. deepwolf is now an inspiration reference only
+  (see THIRD_PARTY_NOTICES.md).
 
 ### Added
 
-- **Initial release**, an independent derivative of
-  [deepwolf](https://github.com/JuneQQQ/deepwolf) at reference commit
-  `cc7e8f4c363f7d66d20f66d4d7479d25c842e048`.
-- Deterministic game engine (roles: 村民/狼人/预言家/守卫/猎人/女巫) with a
-  night/day loop, hunter chains, witch potions and reproducible seeds.
-- `RandomAgent`, `LLMAgent` and a new `HumanAgent` (moved into the agents layer,
-  driven through a scriptable `HumanUI`).
-- `MockProvider` (offline default) and an OpenAI-compatible provider with
-  presets for OpenAI, DeepSeek, MiMo, Groq and OpenRouter. Env prefix:
-  `AIWEREWOLF_*`.
-- Explainable copilot with werewolf-suspicion ranking and Brier-score
-  calibration.
-- Arena (batch runs + statistics), leaderboard, and JSON transcript save/load/
-  replay.
-- `extensions/` layer demonstrating stable-interface extensions
-  (`vote_analysis`).
-- CLI: `simulate`, `play`, `arena`, `leaderboard`, `calibrate`.
-- Full test suite: `pytest`, `ruff`, `mypy`.
+- `domain/` — an explicit referee state machine (setup → night → dawn →
+  discussion → voting → resolution → finished) with validated transitions.
+- `server/` — rooms, matchmaking queue, game sessions, and an admin backend.
+- `players/` — `RandomBot`, `LLMBot`, and `HumanPlayer` (connected via a
+  transport channel).
+- `transport/` — channel abstraction + in-memory implementation, ready for a
+  WebSocket replacement.
+- `copilot/` — explainable werewolf-suspicion advisor + Brier calibration.
+- `replay/` — recording, saving and replaying games (`ai-werewolf.replay/v1`).
+- `stats/` — win/loss ledger, leaderboard and achievement badges.
+- `benchmark.py` — batch evaluation of bot policies.
+- `app.py` — optional FastAPI adapter.
+- `cli.py` — `simulate`, `play`, `arena`, `calibrate`, `replay`.
+
+## [0.1.0] - 2026-01-01 (superseded)
+
+Initial release, replaced by the 0.2.0 independent rewrite.
