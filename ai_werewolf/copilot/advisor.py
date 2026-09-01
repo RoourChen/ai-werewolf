@@ -42,6 +42,17 @@ class Advice:
     recommended_vote: int | None
     rationale: str
 
+    def render(self) -> str:
+        lines = ["🐺 Copilot 狼人嫌疑："]
+        for s in self.suspicions:
+            bar = "█" * round(s.probability * 10)
+            lines.append(
+                f"  P{s.player_id} {s.name:<8} {s.percent:3d}% {bar}  "
+                f"{' ; '.join(s.reasons)}"
+            )
+        lines.append(f"  建议：{self.rationale}")
+        return "\n".join(lines)
+
 
 def advise(view: PlayerView) -> Advice:
     confirmed = _confirmed_factions(view)
@@ -152,7 +163,7 @@ def _confirmed_factions(view: PlayerView) -> dict[int, Faction]:
             confirmed[event.target] = (
                 Faction.WEREWOLVES if event.data.get("is_wolf") else Faction.VILLAGE
             )
-        elif event.kind in (EventKind.DEATH, EventKind.LYNCH, EventKind.HUNTER_SHOT):
+        elif event.kind in (EventKind.DEATH, EventKind.LYNCH):
             role = event.data.get("role")
             if role is not None and event.target is not None:
                 confirmed[event.target] = Role(role).faction

@@ -8,15 +8,15 @@ which creates and runs a :class:`~ai_werewolf.server.session.GameSession`.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from ai_werewolf.ai.provider import Provider
 from ai_werewolf.transport.channel import Channel
 
 if TYPE_CHECKING:
-    from ai_werewolf.players.base import Player
+    from ai_werewolf.server.session import GameSession
 
 
 class RoomStatus(str, Enum):
@@ -31,9 +31,10 @@ class RoomStatus(str, Enum):
 class AIConfig:
     """How the room's bot seats are filled."""
 
-    count: int = 0
-    policy: str = "random"  # "random" | "llm"
+    count: int = 6
+    policy: str = "llm"  # "llm" | "random"
     model: str | None = None
+    provider: Provider | None = None
 
 
 @dataclass
@@ -101,14 +102,14 @@ class Room:
                 return seat
         raise RoomError("no free seat")
 
-    def start(self, bot_factory: Callable[[int], Player]) -> object:
+    def start(self) -> GameSession:
         """Start the game; returns the finished :class:`GameSession`."""
-        from ai_werewolf.server.session import GameSession
+        from ai_werewolf.server.session import GameSession as _GameSession
 
         if self.status is not RoomStatus.READY:
             raise RoomError("room is not ready to start")
         self.status = RoomStatus.PLAYING
-        session = GameSession(self.config, self.humans, bot_factory)
+        session = _GameSession(self.config, self.humans)
         session.run()
         self.result = session
         self.status = RoomStatus.FINISHED

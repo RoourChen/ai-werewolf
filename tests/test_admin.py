@@ -10,7 +10,7 @@ from conftest import AutoChannel
 
 
 def _room() -> Room:
-    return Room(RoomConfig(capacity=4, ai=AIConfig(count=2)))
+    return Room(RoomConfig(capacity=7, ai=AIConfig(count=6)))
 
 
 def test_admin_lists_registered_rooms():

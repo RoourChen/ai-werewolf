@@ -1,8 +1,11 @@
 """An offline, deterministic provider for tests and CI.
 
 :class:`MockProvider` never touches the network. It reads the structured
-``Prompt.hint`` field and answers with valid JSON for every decision kind, in
-the game's language. With a fixed seed it is fully deterministic.
+``Prompt.hint`` (actor role, pack, living others, whether the act is public)
+and answers with valid, *consistent* JSON for every decision kind. Werewolf
+actors report known-fact suspicion (1 for packmates, 0 for others); everyone
+else reports a deterministic per-player belief. Public suspicion mirrors
+private suspicion, so the offline path never trips the deception retry.
 """
 
 from __future__ import annotations
@@ -41,24 +44,50 @@ class MockProvider(Provider):
     def complete(self, prompt: Prompt) -> str:
         hint = prompt.hint
         kind = hint.get("kind", "")
-        candidates = [int(c) for c in hint.get("candidates", [])]
         lang = hint.get("lang", "zh")
+        candidates = [int(c) for c in hint.get("candidates", [])]
+        me_role = hint.get("me_role", "villager")
+        pack = set(hint.get("pack", []))
+        others = [int(p) for p in hint.get("others", [])]
+        public = bool(hint.get("public", False))
 
-        if kind == "statement":
-            return json.dumps(
-                {"statement": self._statement(candidates, lang)}, ensure_ascii=False
-            )
-        if kind == "witch":
-            return json.dumps({"heal": False, "poison": None})
         if kind == "bid":
             return json.dumps({"priority": self.rng.randint(0, 10), "reason": ""})
 
-        if candidates:
-            choice = self.rng.choice(candidates)
-            return json.dumps(
-                {"choice": choice, "reasoning": "offline heuristic choice."}
-            )
-        return json.dumps({"statement": "..."})
+        private: dict[int, float] = {}
+        threat: dict[int, float] = {}
+        for pid in others:
+            if me_role == "werewolf":
+                private[pid] = 1.0 if pid in pack else 0.0
+            else:
+                private[pid] = round(self.rng.random(), 4)
+            threat[pid] = round(self.rng.random(), 4)
+
+        payload: dict = {
+            "reasoning": "offline heuristic decision.",
+            "confidence": 0.7,
+            "evidence": "none",
+            "private_suspicion": private,
+            "strategic_threat": threat,
+            "deception": {
+                "active": False,
+                "target": None,
+                "public_statement": "",
+                "purpose": "",
+                "true_basis": "",
+            },
+        }
+        if public:
+            payload["public_suspicion"] = dict(private)
+
+        if kind == "statement":
+            payload["statement"] = self._statement(candidates, lang)
+        elif kind == "witch":
+            payload["heal"] = False
+            payload["poison"] = None
+        else:
+            payload["choice"] = self.rng.choice(candidates) if candidates else 0
+        return json.dumps(payload, ensure_ascii=False)
 
     def _statement(self, candidates: list[int], lang: str) -> str:
         pool = _STATEMENTS.get(lang, _STATEMENTS["zh"])

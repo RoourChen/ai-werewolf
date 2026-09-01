@@ -5,6 +5,7 @@ and the architecture document for how the layers fit together.
 """
 
 from ai_werewolf.ai.mock import MockProvider
+from ai_werewolf.ai.personas import NEUTRAL, PERSONAS, Persona, assign_personas
 from ai_werewolf.ai.provider import (
     PRESETS,
     ModelConfig,
@@ -19,7 +20,7 @@ from ai_werewolf.copilot.calibration import CalibrationReport, evaluate_copilot
 from ai_werewolf.domain.actions import Action, ActionKind
 from ai_werewolf.domain.events import EventKind, GameEvent
 from ai_werewolf.domain.referee import GamePhase, Referee
-from ai_werewolf.domain.roles import Faction, Role, build_roster
+from ai_werewolf.domain.roles import MVP_SEATS, Faction, Role, build_roster
 from ai_werewolf.domain.state import (
     DecisionRequest,
     GameConfig,
@@ -28,6 +29,7 @@ from ai_werewolf.domain.state import (
     Seat,
     build_view,
 )
+from ai_werewolf.domain.trace import DECEPTION_THRESHOLD, DecisionRecord
 from ai_werewolf.players.human import HumanPlayer
 from ai_werewolf.players.llm_bot import LLMBot
 from ai_werewolf.players.random_bot import RandomBot
@@ -38,6 +40,7 @@ from ai_werewolf.replay.recorder import (
     record_session,
     replay_text,
     save,
+    traces_text,
 )
 from ai_werewolf.server.admin import AdminBackend, ServerStats
 from ai_werewolf.server.matchmaking import Matchmaker
@@ -49,6 +52,10 @@ __version__ = "0.2.0"
 
 __all__ = [
     "MockProvider",
+    "NEUTRAL",
+    "PERSONAS",
+    "Persona",
+    "assign_personas",
     "PRESETS",
     "ModelConfig",
     "OpenAICompatProvider",
@@ -69,6 +76,7 @@ __all__ = [
     "GamePhase",
     "Referee",
     "Faction",
+    "MVP_SEATS",
     "Role",
     "build_roster",
     "DecisionRequest",
@@ -77,6 +85,8 @@ __all__ = [
     "PlayerView",
     "Seat",
     "build_view",
+    "DECEPTION_THRESHOLD",
+    "DecisionRecord",
     "HumanPlayer",
     "LLMBot",
     "RandomBot",
@@ -86,6 +96,7 @@ __all__ = [
     "record_session",
     "replay_text",
     "save",
+    "traces_text",
     "AdminBackend",
     "ServerStats",
     "Matchmaker",

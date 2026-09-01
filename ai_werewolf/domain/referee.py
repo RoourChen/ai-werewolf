@@ -59,7 +59,6 @@ class InvalidTransition(RefereeError):
 @dataclass
 class _NightMemo:
     kill: int | None = None
-    guarded: int | None = None
     healed: bool = False
     poisoned: int | None = None
 
@@ -133,9 +132,8 @@ class Referee:
         )
         kill = self._werewolf_kill()
         self._seer_inspect()
-        guarded = self._guard_protect()
         healed, poisoned = self._witch_potions(kill)
-        self._night_memo = _NightMemo(kill=kill, guarded=guarded, healed=healed, poisoned=poisoned)
+        self._night_memo = _NightMemo(kill=kill, healed=healed, poisoned=poisoned)
         self._transition(GamePhase.DAWN)
 
     def _werewolf_kill(self) -> int | None:
@@ -174,22 +172,6 @@ class Referee:
             data={"is_wolf": is_wolf},
             audience=frozenset({seer.id}),
         )
-
-    def _guard_protect(self) -> int | None:
-        guards = self.state.living_with_role(Role.GUARD)
-        if not guards:
-            return None
-        guard = guards[0]
-        legal = tuple(self.state.living_ids())
-        action = self._ask(DecisionRequest(ActionKind.NIGHT_PROTECT, guard.id, legal))
-        assert action.target is not None
-        self._emit(
-            EventKind.GUARD_PROTECT,
-            self.l10n.msg("guard.protect", who=self._who(action.target)),
-            target=action.target,
-            audience=frozenset({guard.id}),
-        )
-        return action.target
 
     def _witch_potions(self, kill: int | None) -> tuple[bool, int | None]:
         witches = self.state.living_with_role(Role.WITCH)
@@ -245,7 +227,7 @@ class Referee:
     def _dawn(self) -> None:
         memo = self._night_memo
         deaths = resolve_night_deaths(
-            self.state, memo.kill, memo.guarded, memo.healed, memo.poisoned
+            self.state, memo.kill, memo.healed, memo.poisoned
         )
         if not deaths:
             self._emit(EventKind.PEACEFUL_NIGHT, self.l10n.msg("peaceful.night"))
@@ -406,10 +388,8 @@ class Referee:
         kind = {
             "death": EventKind.DEATH,
             "lynch": EventKind.LYNCH,
-            "hunter": EventKind.HUNTER_SHOT,
         }[key]
         self._emit(kind, text, target=player_id, data=data)
-        self._hunter_chain(player_id)
 
     def _death_text(self, player_id: int, key: str) -> tuple[str, dict]:
         role = self.state.seat(player_id).role
@@ -419,43 +399,6 @@ class Referee:
                 {"role": role.value},
             )
         return self.l10n.msg(key, who=self._who(player_id)), {}
-
-    def _hunter_chain(self, player_id: int) -> None:
-        if self.state.seat(player_id).role is not Role.HUNTER:
-            return
-        targets = self.state.living_others(player_id)
-        if not targets:
-            return
-        request = DecisionRequest(ActionKind.HUNTER_SHOT, player_id, tuple(targets))
-        action = self._ask(request)
-        assert action.target is not None
-        self._kill(action.target, "shot by hunter")
-        text, data = self._hunter_shot_text(player_id, action.target)
-        self._emit(
-            EventKind.HUNTER_SHOT,
-            text,
-            actor=player_id,
-            target=action.target,
-            data=data,
-        )
-        self._hunter_chain(action.target)
-
-    def _hunter_shot_text(self, shooter: int, victim: int) -> tuple[str, dict]:
-        role = self.state.seat(victim).role
-        if self.config.reveal_role_on_death:
-            return (
-                self.l10n.msg(
-                    "hunter.shot.revealed",
-                    who=self._who(shooter),
-                    target=self._who(victim),
-                    role=self.l10n.role_name(role),
-                ),
-                {"role": role.value},
-            )
-        return (
-            self.l10n.msg("hunter.shot", who=self._who(shooter), target=self._who(victim)),
-            {},
-        )
 
     def _kill(self, player_id: int, cause: str) -> None:
         seat = self.state.seat(player_id)

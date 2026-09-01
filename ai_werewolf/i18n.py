@@ -38,10 +38,6 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "查验结果：{who} 不是狼人。",
         "en": "Inspection: {who} is not a werewolf.",
     },
-    "guard.protect": {
-        "zh": "你守护了 {who}。",
-        "en": "You guarded {who}.",
-    },
     "witch.attack": {
         "zh": "狼队袭击了 {who}。",
         "en": "The pack attacked {who}.",
@@ -94,14 +90,6 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "平票，无人被放逐。",
         "en": "The vote tied; nobody is lynched.",
     },
-    "hunter.shot": {
-        "zh": "{who} 开枪带走了 {target}。",
-        "en": "{who} shot {target}.",
-    },
-    "hunter.shot.revealed": {
-        "zh": "{who} 开枪带走 {target}，其身份是{role}。",
-        "en": "{who} shot {target}, who was the {role}.",
-    },
     "game.over": {
         "zh": "对局结束，{faction} 获胜。",
         "en": "Game over: {faction} win.",
@@ -112,8 +100,6 @@ _ROLE_NAMES: dict[str, dict[str, str]] = {
     "villager": {"zh": "村民", "en": "villager"},
     "werewolf": {"zh": "狼人", "en": "werewolf"},
     "seer": {"zh": "预言家", "en": "seer"},
-    "guard": {"zh": "守卫", "en": "guard"},
-    "hunter": {"zh": "猎人", "en": "hunter"},
     "witch": {"zh": "女巫", "en": "witch"},
 }
 
@@ -134,14 +120,6 @@ _ROLE_BRIEF: dict[str, dict[str, str]] = {
     "seer": {
         "zh": "每晚查验一名玩家的阵营。",
         "en": "Each night inspect one player's faction.",
-    },
-    "guard": {
-        "zh": "每晚守护一名玩家，使其免受狼人袭击。",
-        "en": "Each night guard one player from the werewolves.",
-    },
-    "hunter": {
-        "zh": "死亡时立即开枪带走一名玩家。",
-        "en": "On death, shoot one player immediately.",
     },
     "witch": {
         "zh": "持有一次性解药与毒药。",

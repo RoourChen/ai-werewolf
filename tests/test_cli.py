@@ -8,7 +8,7 @@ from ai_werewolf.cli import build_parser, main
 
 
 def test_simulate_command_runs():
-    assert main(["simulate", "--players", "6", "--seed", "2"]) == 0
+    assert main(["simulate", "--players", "7", "--seed", "2"]) == 0
 
 
 def test_arena_command_runs():
@@ -21,7 +21,7 @@ def test_calibrate_command_runs():
 
 def test_replay_command_runs(tmp_path):
     path = tmp_path / "g.json"
-    assert main(["simulate", "--players", "5", "--seed", "1", "--transcript", str(path)]) == 0
+    assert main(["simulate", "--players", "7", "--seed", "1", "--transcript", str(path)]) == 0
     assert main(["replay", str(path)]) == 0
 
 

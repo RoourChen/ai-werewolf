@@ -3,7 +3,7 @@
 Commands:
 
 * ``simulate``  — watch one all-bot game;
-* ``play``      — sit at one seat yourself (bots fill the rest, copilot helps);
+* ``play``      — 1 human + 6 AI bots in a room (copilot assists the human);
 * ``arena``     — batch-run a bot policy and print statistics;
 * ``calibrate`` — measure the copilot's Brier calibration;
 * ``replay``    — replay a saved JSON game.
@@ -21,17 +21,26 @@ from ai_werewolf import __version__
 from ai_werewolf.ai.mock import MockProvider
 from ai_werewolf.ai.provider import ModelConfig, OpenAICompatProvider, Provider
 from ai_werewolf.benchmark import run_arena
-from ai_werewolf.copilot.advisor import advise
 from ai_werewolf.copilot.calibration import evaluate_copilot
-from ai_werewolf.domain.actions import Action, ActionKind
+from ai_werewolf.domain.actions import Action
 from ai_werewolf.domain.events import EventKind, GameEvent
 from ai_werewolf.domain.referee import Referee
 from ai_werewolf.domain.roles import build_roster
 from ai_werewolf.domain.state import DecisionRequest, GameConfig, PlayerView
 from ai_werewolf.players.llm_bot import LLMBot
 from ai_werewolf.players.random_bot import RandomBot
-from ai_werewolf.replay.recorder import load as load_replay
-from ai_werewolf.replay.recorder import replay_text, save
+from ai_werewolf.replay.recorder import (
+    load as load_replay,
+)
+from ai_werewolf.replay.recorder import (
+    record_game,
+    record_session,
+    replay_text,
+    save,
+    traces_text,
+)
+from ai_werewolf.server.room import AIConfig, Room, RoomConfig
+from ai_werewolf.transport.channel import Envelope
 
 try:  # rich is optional sugar
     from rich.console import Console
@@ -64,69 +73,67 @@ def build_provider(name: str, seed: int = 0) -> Provider:
     raise ValueError(f"unknown provider {name!r} (use 'mock' or 'env')")
 
 
-class TerminalHuman:
-    """A human at the keyboard, with the copilot at their side."""
+class TerminalChannel:
+    """A human channel backed by the terminal (print prompts, read input)."""
 
-    name = "human"
-
-    def __init__(self, player_id: int, console: Any) -> None:
-        self.player_id = player_id
+    def __init__(self, console: Any) -> None:
         self.console = console
+        self._pending: dict | None = None
 
-    def decide(self, view: PlayerView, request: DecisionRequest) -> Action:
-        self.console.rule(
-            f"你是 {view.name(view.me)}（P{view.me}）——身份 {view.my_role.value}"
-            f"——阶段 {view.phase.value}"
-        )
-        for secret in view.secrets:
-            self.console.print(f"  • {secret}")
-        if request.kind in (ActionKind.VOTE, ActionKind.HUNTER_SHOT):
-            self._show_copilot(view)
-        return self._ask(view, request)
+    def send(self, envelope: Envelope) -> None:
+        if envelope.kind == "decision":
+            self._pending = envelope.payload
+            self.console.rule("轮到你行动")
+            if envelope.payload.get("advice"):
+                self.console.print(envelope.payload["advice"])
+            self.console.print(envelope.payload["prompt"])
+        elif envelope.kind == "event":
+            self.console.print(envelope.payload["event"]["text"])
+        elif envelope.kind == "chat":
+            self.console.print(f"[聊天] P{envelope.payload['player']}: {envelope.payload['body']}")
+        elif envelope.kind == "result":
+            self.console.print(f"对局结束：{envelope.payload['result']['winner']}")
 
-    def _show_copilot(self, view: PlayerView) -> None:
-        advice = advise(view)
-        self.console.print("🐺 Copilot 狼人嫌疑：")
-        for s in advice.suspicions:
-            bar = "█" * round(s.probability * 10)
-            self.console.print(
-                f"  P{s.player_id} {s.name:<8} {s.percent:3d}% {bar}  "
-                f"{'; '.join(s.reasons)}"
-            )
-        self.console.print(f"  建议：{advice.rationale}")
+    def recv(self, timeout: float | None = None) -> Envelope:
+        if self._pending is None:
+            raise TimeoutError("no pending decision")
+        request = self._pending["request"]
+        return Envelope("action", payload={"action": self._ask(request)})
 
-    def _ask(self, view: PlayerView, request: DecisionRequest) -> Action:
-        if request.kind is ActionKind.STATEMENT:
+    def _ask(self, request: dict) -> dict:
+        kind = request["kind"]
+        targets = request.get("legal_targets", [])
+        if kind == "statement":
             text = self.console.input("发言> ").strip()
-            return Action(ActionKind.STATEMENT, request.actor, text=text or "...")
-        if request.kind is ActionKind.BID:
+            return {"kind": kind, "text": text or "..."}
+        if kind == "bid":
             raw = self.console.input("竞价 [0-10]> ").strip()
             priority = int(raw) if raw.isdigit() else 5
             reason = self.console.input("理由（可选）> ").strip()
-            return Action(ActionKind.BID, request.actor, text=reason, priority=priority)
-        if request.kind is ActionKind.WITCH_POTIONS:
+            return {"kind": kind, "priority": priority, "reason": reason}
+        if kind == "witch_potions":
             heal = False
-            if request.can_heal:
+            if request.get("can_heal"):
                 heal = self.console.input("使用解药？[y/N] ").strip().lower().startswith("y")
             poison: int | None = None
-            if request.can_poison:
+            if request.get("can_poison"):
                 raw = self.console.input("毒药——输入编号或留空：").strip().lstrip("Pp")
-                if raw.isdigit() and int(raw) in request.legal_targets:
+                if raw.isdigit() and int(raw) in targets:
                     poison = int(raw)
-            return Action(ActionKind.WITCH_POTIONS, request.actor, heal=heal, poison=poison)
-        named = ", ".join(f"P{c}={view.name(c)}" for c in request.legal_targets)
+            return {"kind": kind, "heal": heal, "poison": poison}
+        named = ", ".join(f"P{t}" for t in targets)
         self.console.print(f"  合法目标：{named}")
         while True:
             raw = self.console.input("> ").strip().lstrip("Pp")
-            if raw.isdigit() and int(raw) in request.legal_targets:
-                return Action(request.kind, request.actor, target=int(raw))
+            if raw.isdigit() and int(raw) in targets:
+                return {"kind": kind, "target": int(raw)}
             self.console.print("  无效，请输入列出的编号。")
 
 
 # ------------------------------------------------------------------ commands
 def cmd_simulate(args: argparse.Namespace) -> int:
     console = _console()
-    provider = build_provider(args.provider, seed=args.model_seed)
+    provider = None if args.provider == "random" else build_provider(args.provider, seed=args.model_seed)
     config = GameConfig(
         roster=build_roster(args.players),
         seed=args.seed,
@@ -135,7 +142,7 @@ def cmd_simulate(args: argparse.Namespace) -> int:
     )
 
     def decider(view: PlayerView, request: DecisionRequest) -> Action:
-        if args.provider == "random":
+        if provider is None:
             return RandomBot(request.actor).decide(view, request)
         return LLMBot(request.actor, provider).decide(view, request)
 
@@ -143,45 +150,38 @@ def cmd_simulate(args: argparse.Namespace) -> int:
     state = Referee(config, decider, observer=lambda e: _print_event(console, e)).run()
     _print_result(console, state)
     if args.transcript:
-        path = save(_game_replay(state), args.transcript)
-        console.print(f"对局已保存到 {path}")
+        save(record_game(state), args.transcript)
+        console.print(f"对局已保存到 {args.transcript}")
     return 0
 
 
 def cmd_play(args: argparse.Namespace) -> int:
     console = _console()
     provider = build_provider(args.provider, seed=args.model_seed)
-    config = GameConfig(
-        roster=build_roster(args.players),
-        seed=args.seed,
+    ai = AIConfig(count=6, policy="llm", provider=provider, model=args.model)
+    room = Room(RoomConfig(
+        capacity=7,
         language=args.lang,
         discussion_mode="bidding" if args.bidding else "seating",
-    )
-    seat = args.seat if args.seat is not None else (args.seed % args.players)
-    human = TerminalHuman(seat, console)
-
-    def decider(view: PlayerView, request: DecisionRequest) -> Action:
-        if request.actor == seat:
-            return human.decide(view, request)
-        if args.provider == "random":
-            return RandomBot(request.actor).decide(view, request)
-        return LLMBot(request.actor, provider).decide(view, request)
-
+        ai=ai,
+        seed=args.seed,
+    ))
+    seat = room.add_human("你", TerminalChannel(console))
     console.rule(f"ai-werewolf play — 你是 P{seat}")
-    try:
-        state = Referee(config, decider, observer=lambda e: _print_public(console, e)).run()
-    except (KeyboardInterrupt, EOFError):
-        console.print("对局已中止。")
-        return 130
-    _print_result(console, state)
-    won = state.winner is state.seat(seat).faction
+    session = room.start()
+    result = session.result
+    assert result is not None
+    _print_result(console, result)
+    console.rule("决策轨迹回放")
+    console.print(traces_text(record_session(session)))
+    won = result.winner is result.seat(seat).faction
     console.print("你赢了！" if won else "你输了。")
     return 0
 
 
 def cmd_arena(args: argparse.Namespace) -> int:
     console = _console()
-    provider = build_provider(args.provider, seed=args.model_seed) if args.provider == "llm" else None
+    provider = build_provider(args.provider, seed=args.model_seed) if args.bots == "llm" else None
     console.rule(f"ai-werewolf arena — {args.games} 局")
     report = run_arena(
         args.players,
@@ -205,8 +205,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
 def cmd_replay(args: argparse.Namespace) -> int:
     console = _console()
-    replay = load_replay(args.path)
-    console.print(replay_text(replay))
+    console.print(replay_text(load_replay(args.path)))
     return 0
 
 
@@ -230,16 +229,10 @@ def _print_result(console: Any, state: object) -> None:
 
     game: GameState = state  # type: ignore[assignment]
     winner = game.winner.value if game.winner else "?"
-    console.rule(f"对局结果 — 胜方 {winner}")
+    console.rule(f"对局结果 — 胜方 {winner}（终局身份揭晓）")
     for seat in game.seats:
         status = "存活" if seat.alive else f"第 {seat.death_day} 天死亡"
         console.print(f"  P{seat.id} {seat.name:<8} {seat.role.value:<10} — {status}")
-
-
-def _game_replay(state: object) -> dict:
-    from ai_werewolf.replay.recorder import record_game
-
-    return record_game(state)  # type: ignore[arg-type]
 
 
 _STYLE = {
@@ -248,7 +241,6 @@ _STYLE = {
     EventKind.DISCUSSION_BEGINS: "yellow",
     EventKind.DEATH: "red",
     EventKind.LYNCH: "red",
-    EventKind.HUNTER_SHOT: "bold red",
     EventKind.PEACEFUL_NIGHT: "green",
     EventKind.GAME_OVER: "bold green",
 }
@@ -258,7 +250,7 @@ _STYLE = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai-werewolf",
-        description="AI狼人杀：真人与 AI 多智能体对战的狼人杀引擎。",
+        description="AI狼人杀：1 真人 + 6 名不同人格 AI 的 7 人狼人杀。",
     )
     parser.add_argument("--version", action="version", version=f"ai-werewolf {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -273,12 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--transcript", metavar="PATH", help="保存对局 JSON")
     sim.set_defaults(func=cmd_simulate)
 
-    play = sub.add_parser("play", help="真人入座，其余席位由 AI 控制")
-    play.add_argument("--players", type=int, default=7)
+    play = sub.add_parser("play", help="1 真人入座 + 6 名 AI")
     play.add_argument("--seed", type=int, default=1)
-    play.add_argument("--seat", type=int, default=None)
-    play.add_argument("--provider", default="mock", help="'mock'、'random' 或 'env'")
+    play.add_argument("--provider", default="mock", help="'mock' 或 'env'")
     play.add_argument("--model-seed", type=int, default=0)
+    play.add_argument("--model", default=None, help="模型名（可选）")
     play.add_argument("--lang", choices=("zh", "en"), default="zh")
     play.add_argument("--bidding", action="store_true")
     play.set_defaults(func=cmd_play)

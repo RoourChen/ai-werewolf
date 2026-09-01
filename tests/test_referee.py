@@ -13,6 +13,7 @@ from ai_werewolf.domain.state import (
     DecisionRequest,
     GameConfig,
     GamePhase,
+    GameState,
     PlayerView,
     build_view,
 )
@@ -20,8 +21,8 @@ from ai_werewolf.players.llm_bot import LLMBot
 from conftest import random_decider
 
 
-def _run(seed: int = 42, n: int = 7):
-    config = GameConfig(roster=build_roster(n), seed=seed)
+def _run(seed: int = 42):
+    config = GameConfig(roster=build_roster(7), seed=seed)
     return Referee(config, random_decider).run()
 
 
@@ -65,7 +66,7 @@ def test_illegal_targets_fall_back_to_legal_choices():
             return Action(request.kind, request.actor, target=999)
         return Action(request.kind, request.actor)
 
-    config = GameConfig(roster=build_roster(6), seed=1)
+    config = GameConfig(roster=build_roster(7), seed=1)
     state = Referee(config, rogue).run()
     assert state.winner in (Faction.VILLAGE, Faction.WEREWOLVES)
 
@@ -105,10 +106,12 @@ class _WitchScript:
     def __init__(self) -> None:
         self.heal = False
         self.poison = -1
+        self.wolf_target = -1
 
     def decider(self, view: PlayerView, request: DecisionRequest) -> Action:
         if request.kind is ActionKind.NIGHT_KILL:
-            return Action(ActionKind.NIGHT_KILL, request.actor, target=view.living_others()[0])
+            target = self.wolf_target if self.wolf_target in view.living_ids() else view.living_others()[0]
+            return Action(ActionKind.NIGHT_KILL, request.actor, target=target)
         if request.kind is ActionKind.WITCH_POTIONS:
             poison = self.poison if self.poison in request.legal_targets else None
             return Action(
@@ -121,12 +124,14 @@ class _WitchScript:
 
 
 def test_witch_heal_cancels_the_night_kill():
+    config = GameConfig(roster=build_roster(7), seed=2)
+    victim = next(
+        s.id for s in GameState.new(config).seats if s.role is Role.VILLAGER
+    )
     script = _WitchScript()
     script.heal = True
-    script.poison = -1
-    config = GameConfig(
-        roster=[Role.WEREWOLF, Role.WITCH, Role.VILLAGER, Role.VILLAGER],
-        seed=2,
-    )
+    script.wolf_target = victim
     state = Referee(config, script.decider).run()
-    assert any(e.kind is EventKind.PEACEFUL_NIGHT for e in state.events)
+    assert any(
+        e.kind is EventKind.PEACEFUL_NIGHT and e.day == 1 for e in state.events
+    )

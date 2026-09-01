@@ -1,17 +1,19 @@
 """Prompt building for LLM players.
 
-These helpers turn a :class:`~ai_werewolf.domain.state.PlayerView` and a
+Turns a :class:`~ai_werewolf.domain.state.PlayerView`, a persona and a
 :class:`~ai_werewolf.domain.state.DecisionRequest` into a structured
-:class:`~ai_werewolf.ai.provider.Prompt`. The prose is written for this
-project and is localised; the JSON reply schema is stable so the offline
-:class:`~ai_werewolf.ai.mock.MockProvider` can answer without a model.
+:class:`~ai_werewolf.ai.provider.Prompt`. The JSON reply schema asks for the
+three suspicion channels (private / public / strategic threat) plus a short
+rationale and an explicit deception plan, so every decision can be traced.
 """
 
 from __future__ import annotations
 
+from ai_werewolf.ai.personas import Persona
 from ai_werewolf.ai.provider import Prompt
 from ai_werewolf.domain.actions import ActionKind
 from ai_werewolf.domain.events import EventKind
+from ai_werewolf.domain.roles import Faction
 from ai_werewolf.domain.state import DecisionRequest, PlayerView
 from ai_werewolf.i18n import L10n
 
@@ -24,17 +26,9 @@ _ASK: dict[str, tuple[str, str]] = {
         "现在是夜晚。作为预言家，选择一名存活玩家查验阵营。",
         "It is night. As the seer, choose one living player to inspect.",
     ),
-    "night_protect": (
-        "现在是夜晚。作为守卫，选择一名存活玩家守护。",
-        "It is night. As the guard, choose one living player to protect.",
-    ),
     "vote": (
         "现在是投票环节。选择一名存活玩家放逐。",
         "It is the daytime vote. Choose one living player to lynch.",
-    ),
-    "hunter_shot": (
-        "你是猎人且刚刚死亡。选择一名存活玩家开枪带走。",
-        "You are the hunter and just died. Choose one living player to shoot.",
     ),
     "statement": (
         "现在是讨论环节。发表一段简短发言（2-4 句）。",
@@ -46,36 +40,76 @@ _ASK: dict[str, tuple[str, str]] = {
     ),
 }
 
+_WOLF_RULES = {
+    "zh": (
+        "你是狼人，必须伪装成村民、必要时撒谎误导。所有狼人都可以撒谎，"
+        "只是欺骗方式与强度不同：按你的人格选择欺骗风格（例如老好人用友善与"
+        "信任感掩盖，激进派用强势指控转移焦点）。绝不要泄露狼队名单。"
+        "你的 private_suspicion 反映你已知的事实：对已知狼人填 1，对已知非狼人填 0；"
+        "用 strategic_threat 衡量对方对你狼队的威胁；用 public_suspicion 表演你"
+        "想公开表现的怀疑。"
+    ),
+    "en": (
+        "You are a werewolf: disguise yourself and lie when useful. Every wolf may "
+        "lie, differing only in style and intensity — follow your persona. Never "
+        "reveal the pack. Your private_suspicion reflects known facts: 1 for known "
+        "wolves, 0 for known non-wolves; use strategic_threat for danger to your "
+        "pack; use public_suspicion for the doubt you choose to perform."
+    ),
+}
+
 _LANG = {"zh": "请使用简体中文。", "en": "Please answer in English."}
 
+#: Kinds that require the full suspicion JSON.
+_SUSPICION_KINDS = {
+    ActionKind.NIGHT_KILL,
+    ActionKind.NIGHT_INSPECT,
+    ActionKind.WITCH_POTIONS,
+    ActionKind.STATEMENT,
+    ActionKind.VOTE,
+}
 
-def build_prompt(view: PlayerView, request: DecisionRequest) -> Prompt:
+#: Kinds whose action is public (they also need public_suspicion).
+_PUBLIC_KINDS = {ActionKind.STATEMENT, ActionKind.VOTE}
+
+
+def build_prompt(view: PlayerView, request: DecisionRequest, persona: Persona) -> Prompt:
     l10n = L10n(view.language)
     return Prompt(
-        system=_system(view, l10n),
-        user=_user(view, request, l10n),
+        system=_system(view, persona, l10n),
+        user=_user(view, request, persona, l10n),
         hint=_hint(view, request),
     )
 
 
-def _system(view: PlayerView, l10n: L10n) -> str:
+def _system(view: PlayerView, persona: Persona, l10n: L10n) -> str:
     role = l10n.role_name(view.my_role)
     brief = l10n.role_brief(view.my_role)
-    return (
-        f"你在玩一局狼人杀。你是 {view.name(view.me)}（P{view.me}），"
-        f"身份是{role}。{brief}\n"
-        "目标：村民阵营在狼人全灭时获胜；狼人阵营在狼人数达到或超过其余存活玩家时获胜。\n"
-        "只依据你可见的信息行动，不要透露你本不该知道的信息。\n"
+    text = (
+        f"你在玩一局 7 人狼人杀。你是 {view.name(view.me)}（P{view.me}），身份是{role}。{brief}\n"
+        f"你的人格：{persona.name}——{persona.speech_style}。\n"
+        f"行为倾向（0-1，仅为倾向而非固定概率）：信任基线 {persona.trust_baseline}、"
+        f"证据敏感度 {persona.evidence_sensitivity}、风险偏好 {persona.risk_preference}、"
+        f"拉票强度 {persona.lobby_strength}、改票阻力 {persona.vote_resistance}、"
+        f"欺骗倾向 {persona.deception_tendency}。\n"
+        "决策优先级：游戏合法性 > 阵营获胜目标 > 人格倾向。\n"
+        "只依据你可见的信息行动，不要使用你无权知道的信息。\n"
+        "阵营目标：村民阵营在狼人全灭时获胜；狼人阵营在狼人数达到或超过其余存活玩家时获胜。\n"
         + _LANG[view.language]
     )
+    if view.my_role.faction is Faction.WEREWOLVES:
+        text += "\n" + _WOLF_RULES[view.language]
+    return text
 
 
-def _user(view: PlayerView, request: DecisionRequest, l10n: L10n) -> str:
+def _user(
+    view: PlayerView, request: DecisionRequest, persona: Persona, l10n: L10n
+) -> str:
     parts = [
         f"=== 第 {view.day} 天 ===" if view.language == "zh" else f"=== Day {view.day} ===",
-        _seats_block(view, l10n),
-        _secrets_block(view, l10n),
-        _log_block(view, l10n),
+        _seats_block(view),
+        _secrets_block(view),
+        _log_block(view),
         _ASK[request.kind.value][0 if view.language == "zh" else 1],
     ]
     if request.legal_targets:
@@ -83,33 +117,68 @@ def _user(view: PlayerView, request: DecisionRequest, l10n: L10n) -> str:
         parts.append(
             f"合法目标：{named}。" if view.language == "zh" else f"Legal targets: {named}."
         )
-    parts.append(_reply_format(request, view.language))
+    parts.append(_reply_format(view, request))
     return "\n\n".join(p for p in parts if p)
 
 
-def _reply_format(request: DecisionRequest, language: str) -> str:
-    if request.kind is ActionKind.STATEMENT:
-        return (
-            '只回复一个 JSON：{"statement": "<你的发言>"}。'
-            if language == "zh"
-            else 'Reply with ONLY JSON: {"statement": "<your words>"}.'
-        )
-    if request.kind is ActionKind.WITCH_POTIONS:
-        return (
-            '只回复一个 JSON：{"heal": true|false, "poison": <玩家编号|null>}。'
-            if language == "zh"
-            else 'Reply with ONLY JSON: {"heal": true|false, "poison": <player id|null>}.'
-        )
+def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
+    lang = view.language
     if request.kind is ActionKind.BID:
         return (
             '只回复一个 JSON：{"priority": <0-10 整数>, "reason": "<简短理由>"}。'
-            if language == "zh"
+            if lang == "zh"
             else 'Reply with ONLY JSON: {"priority": <int 0-10>, "reason": "<short>"}.'
         )
+    if request.kind is ActionKind.WITCH_POTIONS:
+        action_key = (
+            '{"heal": true|false, "poison": <玩家编号|null>}'
+            if lang == "zh"
+            else '{"heal": true|false, "poison": <player id|null>}'
+        )
+    elif request.kind is ActionKind.STATEMENT:
+        action_key = (
+            '{"statement": "<你的发言>"}'
+            if lang == "zh"
+            else '{"statement": "<your words>"}'
+        )
+    else:
+        action_key = (
+            '{"choice": <玩家编号整数>}'
+            if lang == "zh"
+            else '{"choice": <player id int>}'
+        )
+
+    if request.kind not in _SUSPICION_KINDS:
+        return (
+            f"只回复一个 JSON 对象：{action_key}。"
+            if lang == "zh"
+            else f"Reply with ONLY a JSON object: {action_key}."
+        )
+
+    others = "、".join(str(pid) for pid in view.living_others()) or "无"
+    public_part = ""
+    if request.kind in _PUBLIC_KINDS:
+        public_part = (
+            ', "public_suspicion": {<每个存活其他玩家编号>: <0-1>}'
+            if lang == "zh"
+            else ', "public_suspicion": {<each living other id>: <0-1>}'
+        )
     return (
-        '只回复一个 JSON：{"choice": <玩家编号整数>, "reasoning": "<一句话理由>"}。'
-        if language == "zh"
-        else 'Reply with ONLY JSON: {"choice": <player id int>, "reasoning": "<one sentence>"}.'
+        f"只回复一个 JSON 对象：{action_key}, "
+        f'"reasoning": "<一句话>", "confidence": <0-1>, "evidence": "<短标签>", '
+        f'"private_suspicion": {{<每个存活其他玩家编号>: <0-1>}}{public_part}, '
+        f'"strategic_threat": {{<每个存活其他玩家编号>: <0-1>}}, '
+        f'"deception": {{"active": false|true, "target": <编号|null>, '
+        f'"public_statement": "<公开说法>", "purpose": "<欺骗目的>", '
+        f'"true_basis": "<真实依据>"}}。存活其他玩家编号：{others}。'
+        if lang == "zh"
+        else f"Reply with ONLY a JSON object: {action_key}, "
+        f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": "<short tag>", '
+        f'"private_suspicion": {{<each living other id>: <0-1>}}{public_part}, '
+        f'"strategic_threat": {{<each living other id>: <0-1>}}, '
+        f'"deception": {{"active": false|true, "target": <id|null>, '
+        f'"public_statement": "<public claim>", "purpose": "<deception purpose>", '
+        f'"true_basis": "<true basis>"}}. Living other ids: {others}.'
     )
 
 
@@ -120,10 +189,14 @@ def _hint(view: PlayerView, request: DecisionRequest) -> dict:
         "lang": view.language,
         "can_heal": request.can_heal,
         "can_poison": request.can_poison,
+        "me_role": view.my_role.value,
+        "pack": list(view.packmates),
+        "others": [pid for pid in view.living if pid != view.me],
+        "public": request.kind in _PUBLIC_KINDS,
     }
 
 
-def _seats_block(view: PlayerView, l10n: L10n) -> str:
+def _seats_block(view: PlayerView) -> str:
     alive = "存活" if view.language == "zh" else "alive"
     dead = "已死亡" if view.language == "zh" else "DEAD"
     you = "  ← 你" if view.language == "zh" else "  <- you"
@@ -136,14 +209,14 @@ def _seats_block(view: PlayerView, l10n: L10n) -> str:
     return label + "\n" + "\n".join(rows)
 
 
-def _secrets_block(view: PlayerView, l10n: L10n) -> str:
+def _secrets_block(view: PlayerView) -> str:
     if not view.secrets:
         return ""
     label = "只有你知道的信息：" if view.language == "zh" else "What only you know:"
     return label + "\n" + "\n".join(f"  - {s}" for s in view.secrets)
 
 
-def _log_block(view: PlayerView, l10n: L10n) -> str:
+def _log_block(view: PlayerView) -> str:
     secret = "  [私密] " if view.language == "zh" else "  [secret] "
     lines = []
     for e in view.events:

@@ -1,16 +1,17 @@
 """The game session: wires a room's humans and bots into a referee run.
 
-The session is the bridge between the pure :class:`~ai_werewolf.domain.referee.
-Referee` and the outside world. It builds the players, drives the referee,
-broadcasts public events to human channels and spectators, and accepts
-real-time text/voice chat during the discussion phase.
+The session is the orchestration layer: it builds the players (one human over
+a channel plus AI seats built from ``AIConfig`` with independent persona
+assignment), drives the referee, broadcasts public events, accepts real-time
+chat, and **appends each AI's decision record at decision time** (append-only,
+never regenerated at game end).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from ai_werewolf.ai.personas import assign_personas
 from ai_werewolf.domain.actions import Action
 from ai_werewolf.domain.events import GameEvent, to_dict
 from ai_werewolf.domain.referee import Referee
@@ -22,12 +23,13 @@ from ai_werewolf.domain.state import (
     GameState,
     PlayerView,
 )
+from ai_werewolf.domain.trace import DecisionRecord
 from ai_werewolf.players.base import Player
 from ai_werewolf.players.human import HumanPlayer
+from ai_werewolf.players.llm_bot import LLMBot
+from ai_werewolf.players.random_bot import RandomBot
 from ai_werewolf.server.room import HumanSeat, RoomConfig
 from ai_werewolf.transport.channel import Channel, Envelope
-
-BotFactory = Callable[[int], Player]
 
 
 @dataclass
@@ -42,15 +44,16 @@ class ChatMessage:
 
 @dataclass
 class GameSession:
-    """Runs one room to completion and exposes its live stream."""
+    """Runs one room to completion and exposes its live stream and traces."""
 
     config: RoomConfig
     humans: dict[int, HumanSeat]
-    bot_factory: BotFactory
 
     players: dict[int, Player] = field(default_factory=dict)
+    persona_map: dict[int, str] = field(default_factory=dict)
     events: list[GameEvent] = field(default_factory=list)
     chat: list[ChatMessage] = field(default_factory=list)
+    traces: dict[int, list[DecisionRecord]] = field(default_factory=dict)
     spectators: list[Channel] = field(default_factory=list)
     referee: Referee | None = None
     result: GameState | None = None
@@ -62,10 +65,19 @@ class GameSession:
         for seat, human in self.humans.items():
             names[seat] = human.name
             players[seat] = HumanPlayer(seat, human.channel)
-        for seat in range(capacity):
-            if seat not in players:
-                players[seat] = self.bot_factory(seat)
-                names[seat] = f"Bot{seat}"
+
+        ai_seats = [seat for seat in range(capacity) if seat not in players]
+        personas = assign_personas(ai_seats, self.config.seed)
+        for seat in ai_seats:
+            persona = personas[seat]
+            if self.config.ai.policy == "llm":
+                if self.config.ai.provider is None:
+                    raise SessionError("AIConfig.policy='llm' requires AIConfig.provider")
+                players[seat] = LLMBot(seat, self.config.ai.provider, persona)
+            else:
+                players[seat] = RandomBot(seat)
+            names[seat] = persona.name
+        self.persona_map = {seat: persona.id for seat, persona in personas.items()}
 
         game_config = GameConfig(
             roster=build_roster(capacity),
@@ -96,7 +108,13 @@ class GameSession:
         self.spectators.append(channel)
 
     def _decide(self, view: PlayerView, request: DecisionRequest) -> Action:
-        return self.players[request.actor].decide(view, request)
+        player = self.players[request.actor]
+        action = player.decide(view, request)
+        # Append-only trace captured at decision time by the orchestration layer.
+        record = getattr(player, "latest_record", None)
+        if record is not None:
+            self.traces.setdefault(request.actor, []).append(record)
+        return action
 
     def _observe(self, event: GameEvent) -> None:
         self.events.append(event)

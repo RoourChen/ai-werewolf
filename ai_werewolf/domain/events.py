@@ -19,7 +19,6 @@ class EventKind(str, Enum):
     NIGHT_BEGINS = "night_begins"
     WOLF_KILL = "wolf_kill"
     SEER_RESULT = "seer_result"
-    GUARD_PROTECT = "guard_protect"
     WITCH_ATTACK = "witch_attack"
     WITCH_POTIONS = "witch_potions"
     DAWN = "dawn"
@@ -31,7 +30,6 @@ class EventKind(str, Enum):
     VOTE = "vote"
     LYNCH = "lynch"
     NO_LYNCH = "no_lynch"
-    HUNTER_SHOT = "hunter_shot"
     GAME_OVER = "game_over"
 
 

@@ -8,7 +8,7 @@ from enum import Enum
 
 from ai_werewolf.domain.actions import ActionKind
 from ai_werewolf.domain.events import EventKind, GameEvent
-from ai_werewolf.domain.roles import Faction, Role
+from ai_werewolf.domain.roles import MVP_SEATS, Faction, Role
 from ai_werewolf.i18n import LANGUAGES, L10n
 
 
@@ -32,12 +32,12 @@ class GameConfig:
     discussion_rounds: int = 1
     discussion_mode: str = "seating"  # "seating" or "bidding"
     max_days: int = 20
-    reveal_role_on_death: bool = True
+    reveal_role_on_death: bool = False
     player_names: list[str] | None = None
 
     def __post_init__(self) -> None:
-        if len(self.roster) < 4:
-            raise ValueError("a game needs at least 4 roles")
+        if len(self.roster) != MVP_SEATS:
+            raise ValueError(f"the MVP only supports {MVP_SEATS}-player games")
         if self.player_names is not None and len(self.player_names) != len(self.roster):
             raise ValueError("player_names must match the number of roles")
         if self.language not in LANGUAGES:

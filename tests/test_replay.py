@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
+from ai_werewolf.ai.mock import MockProvider
 from ai_werewolf.domain.referee import Referee
 from ai_werewolf.domain.roles import build_roster
 from ai_werewolf.domain.state import GameConfig
-from ai_werewolf.players.random_bot import RandomBot
 from ai_werewolf.replay.recorder import (
     SCHEMA,
     load,
@@ -52,11 +52,18 @@ def test_replay_text_is_readable():
     assert len(text.splitlines()) > 5
 
 
-def test_record_session_includes_chat():
-    config = RoomConfig(capacity=4, ai=AIConfig(count=3), seed=1)
+def test_record_session_includes_chat_and_traces():
+    config = RoomConfig(
+        capacity=7,
+        ai=AIConfig(count=6, policy="llm", provider=MockProvider(seed=0)),
+        seed=1,
+    )
     humans = {0: HumanSeat(name="Alice", channel=AutoChannel())}
-    session = GameSession(config, humans, lambda pid: RandomBot(pid))
+    session = GameSession(config, humans)
     session.run()
     replay = record_session(session)
     assert "chat" in replay
     assert isinstance(replay["chat"], list)
+    assert "traces" in replay
+    assert replay["human_seats"] == [0]
+    assert replay["persona_map"]

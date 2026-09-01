@@ -65,9 +65,9 @@ class _ExplodingProvider(Provider):
 
 def test_llm_bot_survives_provider_exception():
     bot = LLMBot(0, _ExplodingProvider())
-    view = _view(Role.GUARD)
-    request = DecisionRequest(ActionKind.NIGHT_PROTECT, 0, legal_targets=(0, 1, 2, 3, 4))
-    assert bot.decide(view, request).target in (0, 1, 2, 3, 4)
+    view = _view(Role.SEER)
+    request = DecisionRequest(ActionKind.NIGHT_INSPECT, 0, legal_targets=(1, 2, 3, 4))
+    assert bot.decide(view, request).target in (1, 2, 3, 4)
 
 
 def test_parse_json_handles_fences_and_prose():

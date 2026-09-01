@@ -25,13 +25,12 @@ def determine_winner(state: GameState) -> Faction | None:
 def resolve_night_deaths(
     state: GameState,
     kill: int | None,
-    guarded: int | None,
     healed: bool,
     poisoned: int | None,
 ) -> list[tuple[int, str]]:
     """Compute the night's deaths as ``(player_id, cause)`` pairs."""
     deaths: list[tuple[int, str]] = []
-    if kill is not None and kill != guarded and not healed:
+    if kill is not None and not healed:
         deaths.append((kill, "killed"))
     if poisoned is not None and poisoned not in {d[0] for d in deaths}:
         deaths.append((poisoned, "poisoned"))

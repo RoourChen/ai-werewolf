@@ -10,25 +10,23 @@ from conftest import AutoChannel
 
 
 def _maker() -> Matchmaker:
-    return Matchmaker(RoomConfig(capacity=4, ai=AIConfig(count=2)))
+    return Matchmaker(RoomConfig(capacity=7, ai=AIConfig(count=6)))
 
 
 def test_matchmaker_forms_rooms_from_the_queue():
     maker = _maker()
-    for i in range(4):
+    for i in range(3):
         maker.enqueue(i, f"P{i}", AutoChannel())
-    assert maker.queue_size() == 4
+    assert maker.queue_size() == 3
     rooms = maker.form_rooms()
-    assert len(rooms) == 2  # 4 humans, 2 per room
+    assert len(rooms) == 3  # 1 human per 7-seat room
     assert maker.queue_size() == 0
     assert all(room.status.value == "ready" for room in rooms)
 
 
-def test_matchmaker_waits_for_enough_players():
+def test_matchmaker_forms_nothing_from_an_empty_queue():
     maker = _maker()
-    maker.enqueue(0, "P0", AutoChannel())
     assert maker.form_rooms() == []
-    assert maker.queue_size() == 1
 
 
 def test_matchmaker_rejects_duplicate_player():
@@ -40,8 +38,7 @@ def test_matchmaker_rejects_duplicate_player():
 
 def test_matchmaker_cancels_a_room():
     maker = _maker()
-    for i in range(2):
-        maker.enqueue(i, f"P{i}", AutoChannel())
+    maker.enqueue(0, "P0", AutoChannel())
     room = maker.form_rooms()[0]
     maker.cancel(room.id)
     assert room.status.value == "cancelled"

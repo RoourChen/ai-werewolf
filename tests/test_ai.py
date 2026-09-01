@@ -33,15 +33,17 @@ def test_mock_choice_is_legal_and_deterministic():
 def test_mock_statement_and_witch_and_bid():
     statement = json.loads(MockProvider(seed=0).complete(_prompt("statement", [1, 2])))
     assert statement["statement"]
+    assert "private_suspicion" in statement
     witch = json.loads(MockProvider(seed=0).complete(_prompt("witch", [1, 2, 3])))
-    assert witch == {"heal": False, "poison": None}
+    assert witch["heal"] is False
+    assert witch["poison"] is None
     bid = json.loads(MockProvider(seed=0).complete(_prompt("bid", [])))
     assert 0 <= bid["priority"] <= 10
 
 
 def test_mock_without_candidates_is_safe():
     data = json.loads(MockProvider().complete(Prompt("sys", "hi")))
-    assert "statement" in data
+    assert isinstance(data, dict)
 
 
 def test_model_config_from_env_preset(monkeypatch):

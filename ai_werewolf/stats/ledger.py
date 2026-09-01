@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from ai_werewolf.domain.roles import Faction, Role
 from ai_werewolf.domain.state import GameState
 
-_GOD_ROLES = {Role.SEER.value, Role.GUARD.value, Role.WITCH.value, Role.HUNTER.value}
+_GOD_ROLES = {Role.SEER.value, Role.WITCH.value}
 
 
 @dataclass

@@ -7,6 +7,7 @@ client, a web client or a scripted test double can all drive it identically.
 
 from __future__ import annotations
 
+from ai_werewolf.copilot.advisor import advise
 from ai_werewolf.domain.actions import Action, ActionKind
 from ai_werewolf.domain.state import DecisionRequest, PlayerView
 from ai_werewolf.players.base import Player
@@ -28,6 +29,7 @@ class HumanPlayer(Player):
             sender=self.player_id,
             payload={
                 "prompt": render_human_prompt(view, request),
+                "advice": advise(view).render(),
                 "request": _request_payload(request),
             },
         ))
@@ -63,10 +65,8 @@ def render_human_prompt(view: PlayerView, request: DecisionRequest) -> str:
 _ACTION_HINT = {
     "night_kill": "选择猎杀目标。",
     "night_inspect": "选择查验目标。",
-    "night_protect": "选择守护目标。",
     "witch_potions": "决定是否使用解药/毒药。",
     "vote": "选择放逐目标。",
-    "hunter_shot": "选择开枪目标。",
     "statement": "输入你的发言。",
     "bid": "输入竞价（0-10）。",
 }
