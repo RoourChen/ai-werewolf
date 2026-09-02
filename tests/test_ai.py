@@ -10,6 +10,7 @@ from ai_werewolf.ai.mock import MockProvider
 from ai_werewolf.ai.provider import (
     PRESETS,
     ModelConfig,
+    OpenAICompatProvider,
     Prompt,
     ProviderError,
 )
@@ -74,3 +75,66 @@ def test_model_config_requires_all_fields(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(ProviderError):
         ModelConfig.from_env(env_file=None)
+
+
+def test_openai_provider_sends_thinking_off_explicitly(monkeypatch):
+    import httpx
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["payload"] = json
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    config = ModelConfig(
+        base_url="https://api.deepseek.com",
+        api_key="secret-key",
+        model="deepseek-v4-flash",
+        thinking=False,
+        response_format={"type": "json_object"},
+    )
+    provider = OpenAICompatProvider(config)
+    assert provider.complete(Prompt("sys", "user")) == "ok"
+    assert captured["payload"]["thinking"] is False
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert "api_key" not in captured["payload"]
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+
+
+def test_openai_provider_can_enable_thinking(monkeypatch):
+    import httpx
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    config = ModelConfig(
+        base_url="https://api.deepseek.com", api_key="k", model="deepseek-v4-flash", thinking=True
+    )
+    OpenAICompatProvider(config).complete(Prompt("sys", "user"))
+    assert captured["payload"]["thinking"] is True
