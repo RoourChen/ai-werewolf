@@ -194,6 +194,20 @@ def test_evidence_must_reference_a_visible_event_id():
     assert good.latest_record.evidence == "E0"
 
 
+def test_evidence_accepts_event_id_list():
+    view = _fact_view()  # GAME_STARTED id=0, SEER_RESULT id=2
+    good = LLMBot(0, _FixedProvider(_json(evidence=["E0", "E2"])), PERSONAS["analyst"])
+    good.decide(view, _vote_request())
+    assert good.latest_record is not None
+    assert good.latest_record.fallback_reason is None
+    assert good.latest_record.evidence == "E0,E2"
+
+    bad = LLMBot(0, _FixedProvider(_json(evidence=["E0", 999])), PERSONAS["analyst"])
+    bad.decide(view, _vote_request())
+    assert bad.latest_record is not None
+    assert "unknown event" in bad.latest_record.fallback_reason
+
+
 def test_missing_suspicion_keys_are_rejected():
     text = _json(private={1: 0.2, 2: 0.3})  # missing 3 and 4
     bot = LLMBot(0, _FixedProvider(text), PERSONAS["chatterbox"])

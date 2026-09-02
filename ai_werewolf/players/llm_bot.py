@@ -272,27 +272,37 @@ def _validate_evidence(evidence: object, view: PlayerView) -> str | None:
         return None
     if isinstance(evidence, bool):
         return "invalid evidence"
-    if isinstance(evidence, int):
-        event_id = evidence
-    else:
-        try:
-            event_id = int(str(evidence))
-        except (TypeError, ValueError):
+    ids = evidence if isinstance(evidence, list) else [evidence]
+    visible = {e.id for e in view.events}
+    for item in ids:
+        event_id = _parse_event_id(item)
+        if event_id is None:
             return "invalid evidence"
-    if event_id not in {e.id for e in view.events}:
-        return "evidence references unknown event"
+        if event_id not in visible:
+            return "evidence references unknown event"
     return None
+
+
+def _parse_event_id(item: object) -> int | None:
+    if isinstance(item, bool):
+        return None
+    if isinstance(item, int):
+        return item
+    text = str(item).strip()
+    if text[:1].upper() == "E":
+        text = text[1:]
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
 
 
 def _evidence_text(evidence: object) -> str:
     if evidence is None:
         return "none"
-    if isinstance(evidence, int):
-        return f"E{evidence}"
-    try:
-        return f"E{int(str(evidence))}"
-    except (TypeError, ValueError):
-        return "none"
+    ids = evidence if isinstance(evidence, list) else [evidence]
+    parsed = [eid for eid in (_parse_event_id(i) for i in ids) if eid is not None]
+    return ",".join(f"E{eid}" for eid in parsed) or "none"
 
 
 def _validate_witch(data: dict, request: DecisionRequest) -> str | None:

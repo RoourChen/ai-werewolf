@@ -168,7 +168,7 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         )
     return (
         f"只回复一个 JSON 对象：{action_key}, "
-        f'"reasoning": "<一句话>", "confidence": <0-1>, "evidence": <可见事件编号|null>, '
+        f'"reasoning": "<一句话>", "confidence": <0-1>, "evidence": <可见事件编号整数/数组|null>, '
         f'"private_suspicion": {{<每个存活其他玩家编号>: <0-1>}}{public_part}, '
         f'"strategic_threat": {{<每个存活其他玩家编号>: <0-1>}}, '
         f'"deception": {{"active": false|true, "target": <编号|null>, '
@@ -177,7 +177,7 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         f"存活其他玩家编号：{others}。"
         if lang == "zh"
         else f"Reply with ONLY a JSON object: {action_key}, "
-        f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": <visible event id|null>, '
+        f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": <visible event id int/array|null>, '
         f'"private_suspicion": {{<each living other id>: <0-1>}}{public_part}, '
         f'"strategic_threat": {{<each living other id>: <0-1>}}, '
         f'"deception": {{"active": false|true, "target": <id|null>, '
