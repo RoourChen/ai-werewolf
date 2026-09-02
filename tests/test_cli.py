@@ -35,6 +35,32 @@ def test_simulate_saves_traces_in_transcript(tmp_path):
     assert data["traces"]  # non-empty decision traces
 
 
+def test_play_transcript_saves_sanitized_record(tmp_path, monkeypatch):
+    import json
+
+    from ai_werewolf import cli
+    from conftest import AutoChannel
+
+    # Replace the interactive terminal channel with a scripted human channel.
+    monkeypatch.setattr(cli, "TerminalChannel", lambda console: AutoChannel())
+    path = tmp_path / "play.json"
+    assert cli.main(["play", "--provider", "mock", "--seed", "1", "--transcript", str(path)]) == 0
+    assert path.exists()
+
+    text = path.read_text(encoding="utf-8")
+    assert "api_key" not in text  # no API key anywhere in the file
+    data = json.loads(text)
+    assert data["events"]
+    assert data["traces"]
+    assert data["model_stats"] is not None
+    # every trace record carries the first_failure field
+    first = next(rec for recs in data["traces"].values() for rec in recs)
+    assert "first_failure" in first
+
+    # the saved file can be read back by the replay command
+    assert cli.main(["replay", str(path)]) == 0
+
+
 def test_unknown_provider_is_reported(capsys):
     rc = main(["simulate", "--provider", "bogus"])
     assert rc == 1
