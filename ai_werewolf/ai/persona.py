@@ -135,9 +135,9 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         )
     if request.kind is ActionKind.LAST_WORDS:
         return (
-            '只回复一个 JSON：{"statement": "<你的遗言>"}。'
+            '只回复一个 JSON：{"statement": "<你的遗言，建议60-100字，最多120字>"}。'
             if lang == "zh"
-            else 'Reply with ONLY JSON: {"statement": "<your last words>"}.'
+            else 'Reply with ONLY JSON: {"statement": "<last words, 60-100 chars suggested, max 120>"}.'
         )
     if request.kind is ActionKind.WITCH_POTIONS:
         action_key = (

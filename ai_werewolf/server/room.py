@@ -7,6 +7,7 @@ which creates and runs a :class:`~ai_werewolf.server.session.GameSession`.
 
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -42,12 +43,17 @@ class AIConfig:
             raise ValueError(f"unknown AI policy {self.policy!r} (use 'llm' or 'random')")
 
     def resolve_provider(self, seed: int | None) -> Provider:
-        """Build the provider: explicit provider > model (from env) > mock."""
+        """Build the provider: explicit provider > model (CLI/AIConfig) > env > mock.
+
+        Model priority is fixed: explicit ``model`` field (set by the CLI when
+        given) wins, then the ``AIWEREWOLF_MODEL`` environment variable.
+        """
         if self.provider is not None:
             return self.provider
-        if self.model is not None:
+        model = self.model or os.environ.get("AIWEREWOLF_MODEL", "") or None
+        if model:
             config = ModelConfig.from_env(env_file=None)
-            config.model = self.model
+            config.model = model
             return OpenAICompatProvider(config)
         return MockProvider(seed=seed or 0)
 

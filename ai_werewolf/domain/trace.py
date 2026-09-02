@@ -45,6 +45,8 @@ class DecisionRecord:
     fallback_reason: str | None = None
     threat_delta: Mapping[int, float] = field(default_factory=dict)
     threat_key_player: int | None = None
+    retried: bool = False
+    pending_review: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "private_suspicion", MappingProxyType(dict(self.private_suspicion)))
@@ -77,6 +79,8 @@ class DecisionRecord:
             "deception": self.deception,
             "deception_plan": dict(self.deception_plan),
             "fallback_reason": self.fallback_reason,
+            "retried": self.retried,
+            "pending_review": self.pending_review,
         }
 
 

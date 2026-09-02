@@ -32,7 +32,7 @@ def test_wolves_cannot_target_wolves():
             assert event.target not in wolves
 
 
-def test_witch_uses_at_most_one_potion_per_night():
+def test_witch_rejects_illegal_double_potion():
     config = GameConfig(roster=build_roster(7), seed=3)
     referee = Referee(config, random_decider)
     villagers = [s.id for s in referee.state.seats if s.role is Role.VILLAGER]
@@ -48,8 +48,26 @@ def test_witch_uses_at_most_one_potion_per_night():
 
     referee.decider = Script()
     healed, poisoned = referee._witch_potions(kill=victim)
+    assert healed is False  # illegal double potion is rejected, not partially applied
+    assert poisoned is None
+
+
+def test_witch_heal_only_is_applied():
+    config = GameConfig(roster=build_roster(7), seed=3)
+    referee = Referee(config, random_decider)
+    villagers = [s.id for s in referee.state.seats if s.role is Role.VILLAGER]
+    victim = villagers[0]
+
+    class Script:
+        def __call__(self, view, request):
+            if request.kind is ActionKind.WITCH_POTIONS:
+                return Action(ActionKind.WITCH_POTIONS, request.actor, heal=True)
+            return random_decider(view, request)
+
+    referee.decider = Script()
+    healed, poisoned = referee._witch_potions(kill=victim)
     assert healed is True
-    assert poisoned is None  # heal consumed the only allowed potion this night
+    assert poisoned is None
 
 
 def test_witch_cannot_self_heal_after_night_one():
@@ -227,3 +245,63 @@ def test_mock_produces_real_deception_record():
     target = rec.deception_plan["target"]
     assert isinstance(target, int)
     assert abs(rec.public_suspicion[target] - rec.private_suspicion[target]) >= 0.20
+
+
+def test_ai_wolves_coordinate_once_when_split():
+    config = GameConfig(roster=build_roster(7), seed=4)
+    referee = Referee(config, random_decider)
+    wolves = [s for s in referee.state.seats if s.role is Role.WEREWOLF]
+    villagers = [s.id for s in referee.state.seats if s.role is Role.VILLAGER]
+    target_a, target_b = villagers[0], villagers[1]
+    calls = {"night_kill": 0}
+
+    class Script:
+        def __call__(self, view, request):
+            if request.kind is ActionKind.NIGHT_KILL:
+                calls["night_kill"] += 1
+                if request.suggestions:
+                    return Action(ActionKind.NIGHT_KILL, request.actor, target=request.suggestions[0])
+                return Action(
+                    ActionKind.NIGHT_KILL, request.actor,
+                    target=target_a if request.actor == wolves[0].id else target_b,
+                )
+            return random_decider(view, request)
+
+    referee.decider = Script()
+    victim = referee._werewolf_kill()
+    assert calls["night_kill"] == 4  # two split wolves, two rounds
+    assert victim == min(target_a, target_b)
+
+
+def test_ai_last_words_are_capped_at_120_chars():
+    config = GameConfig(roster=build_roster(7), seed=5)
+    referee = Referee(config, random_decider)
+    referee.state.seat(0).is_human = False
+
+    class Script:
+        def __call__(self, view, request):
+            if request.kind is ActionKind.LAST_WORDS:
+                return Action(ActionKind.LAST_WORDS, request.actor, text="字" * 300)
+            return random_decider(view, request)
+
+    referee.decider = Script()
+    referee._last_words(0)
+    event = [e for e in referee.state.events if e.kind is EventKind.LAST_WORDS][0]
+    assert len(event.data["text"]) == 120
+
+
+def test_last_words_given_up_when_empty():
+    config = GameConfig(roster=build_roster(7), seed=5)
+    referee = Referee(config, random_decider)
+    referee.state.seat(0).is_human = False
+
+    class Script:
+        def __call__(self, view, request):
+            if request.kind is ActionKind.LAST_WORDS:
+                return Action(ActionKind.LAST_WORDS, request.actor, text="")
+            return random_decider(view, request)
+
+    referee.decider = Script()
+    referee._last_words(0)
+    event = [e for e in referee.state.events if e.kind is EventKind.LAST_WORDS][0]
+    assert event.data["gave_up"] is True

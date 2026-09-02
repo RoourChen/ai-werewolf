@@ -90,6 +90,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "平票，无人被放逐。",
         "en": "The vote tied; nobody is lynched.",
     },
+    "last.words": {
+        "zh": "{who}（遗言）: {text}",
+        "en": "{who} (last words): {text}",
+    },
+    "last.words.gave_up": {
+        "zh": "{who} 放弃遗言。",
+        "en": "{who} gave up their last words.",
+    },
     "game.over": {
         "zh": "对局结束，{faction} 获胜。",
         "en": "Game over: {faction} win.",

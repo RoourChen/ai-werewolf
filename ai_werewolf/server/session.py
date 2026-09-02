@@ -51,6 +51,7 @@ class GameSession:
 
     players: dict[int, Player] = field(default_factory=dict)
     persona_map: dict[int, str] = field(default_factory=dict)
+    provider: object = None
     events: list[GameEvent] = field(default_factory=list)
     chat: list[ChatMessage] = field(default_factory=list)
     traces: dict[int, list[DecisionRecord]] = field(default_factory=dict)
@@ -68,7 +69,8 @@ class GameSession:
 
         ai_seats = [seat for seat in range(capacity) if seat not in players]
         personas = assign_personas(ai_seats, self.config.seed)
-        provider = self.config.ai.resolve_provider(self.config.seed)
+        self.provider = self.config.ai.resolve_provider(self.config.seed)
+        provider = self.provider
         for seat in ai_seats:
             persona = personas[seat]
             if self.config.ai.policy == "llm":

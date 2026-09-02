@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import random
 
-from ai_werewolf.ai.provider import Prompt, Provider
+from ai_werewolf.ai.provider import ModelRunStats, Prompt, Provider
 
 _STATEMENTS: dict[str, list[str]] = {
     "zh": [
@@ -40,6 +40,7 @@ class MockProvider(Provider):
 
     def __init__(self, seed: int = 0) -> None:
         self.rng = random.Random(seed)
+        self.stats = ModelRunStats(provider="mock", model="mock")
 
     def complete(self, prompt: Prompt) -> str:
         hint = prompt.hint

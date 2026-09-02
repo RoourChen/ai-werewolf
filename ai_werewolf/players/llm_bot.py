@@ -83,18 +83,18 @@ class LLMBot(Player):
         prompt = build_prompt(view, request, self.persona)
         data = _parse_json(self._call(prompt))
         if data is None:
-            record, action = self._build_fallback(request, view, "unparseable output")
+            record, action = self._build_fallback(request, view, "unparseable output", retried=False)
         else:
             issue = self._validate(request, view, data)
             if issue is None:
-                record, action = self._build(request, view, data, None)
+                record, action = self._build(request, view, data, None, retried=False)
             else:
                 retried = _parse_json(self._call(self._corrective(view, request, issue)))
                 if retried is not None and self._validate(request, view, retried) is None:
-                    record, action = self._build(request, view, retried, None)
+                    record, action = self._build(request, view, retried, None, retried=True)
                 else:
                     record, action = self._build_fallback(
-                        request, view, f"retry failed: {issue}"
+                        request, view, f"retry failed: {issue}", retried=True
                     )
         self._append(record)
         return action
@@ -144,11 +144,16 @@ class LLMBot(Player):
                     if abs(score - expected) > 0.1:
                         return "wolf pretended unknown judgment"
 
-            if request.kind in _PUBLIC_KINDS:
-                public = parse_scores(data.get("public_suspicion"), others) or {}
-                issue = _validate_deception(data, others, private, public, view)
+            if request.kind is ActionKind.WITCH_POTIONS:
+                issue = _validate_witch(data, request)
                 if issue is not None:
                     return issue
+
+            if request.kind in _PUBLIC_KINDS:
+                public = parse_scores(data.get("public_suspicion"), others) or {}
+                status = _deception_status(data, others, private, public, view)
+                if status not in ("none", "confirmed", "pending_review"):
+                    return status
         return None
 
     def _build(
@@ -157,6 +162,8 @@ class LLMBot(Player):
         view: PlayerView,
         data: dict,
         fallback_reason: str | None,
+        *,
+        retried: bool = False,
     ) -> tuple[DecisionRecord, Action]:
         others = view.living_others()
         if request.kind in _SUSPICION_KINDS:
@@ -185,6 +192,11 @@ class LLMBot(Player):
         deception = data.get("deception")
         plan = deception if isinstance(deception, dict) else {}
         marked = request.kind in _PUBLIC_KINDS and bool(plan.get("active"))
+        status = (
+            _deception_status(data, others, private, public, view)
+            if request.kind in _PUBLIC_KINDS
+            else "none"
+        )
         action = _to_action(request, data, view)
         evidence = _evidence_text(data.get("evidence"))
         confidence = parse_number(data.get("confidence")) or 0.5
@@ -207,14 +219,16 @@ class LLMBot(Player):
             decision=_describe_action(action),
             confidence=confidence,
             rationale=str(data.get("reasoning", "")),
-            deception=marked,
+            deception=(status == "confirmed"),
             deception_plan=_deception_plan(plan) if marked else {},
             fallback_reason=fallback_reason,
+            retried=retried,
+            pending_review=(status == "pending_review"),
         )
         return record, action
 
     def _build_fallback(
-        self, request: DecisionRequest, view: PlayerView, reason: str
+        self, request: DecisionRequest, view: PlayerView, reason: str, *, retried: bool = False
     ) -> tuple[DecisionRecord, Action]:
         others = view.living_others()
         private = {
@@ -247,6 +261,7 @@ class LLMBot(Player):
             deception=False,
             deception_plan={},
             fallback_reason=reason,
+            retried=retried,
         )
         return record, action
 
@@ -280,13 +295,28 @@ def _evidence_text(evidence: object) -> str:
         return "none"
 
 
-def _validate_deception(
+def _validate_witch(data: dict, request: DecisionRequest) -> str | None:
+    heal = bool(data.get("heal"))
+    poison = data.get("poison")
+    if heal and poison is not None:
+        return "illegal double potion"
+    if heal and not request.can_heal:
+        return "illegal heal"
+    if poison is not None:
+        if not request.can_poison:
+            return "illegal poison"
+        if not isinstance(poison, int) or poison not in request.legal_targets:
+            return "illegal poison target"
+    return None
+
+
+def _deception_status(
     data: dict,
     others: list[int],
     private: dict[int, float],
     public: dict[int, float],
     view: PlayerView,
-) -> str | None:
+) -> str:
     plan = data.get("deception")
     if not isinstance(plan, dict):
         return "deception must be an object"
@@ -294,7 +324,7 @@ def _validate_deception(
     if not marked:
         if any(abs(public[p] - private[p]) >= DECEPTION_THRESHOLD for p in others):
             return "public/private gap without deception mark"
-        return None
+        return "none"
 
     target = plan.get("target")
     if not (isinstance(target, int) and target in others):
@@ -303,11 +333,18 @@ def _validate_deception(
         return "deception marked without complete plan"
     gap = abs(public.get(target, 0.0) - private.get(target, 0.0))
     if gap >= DECEPTION_THRESHOLD:
-        return None
+        return "confirmed"
+    big_gap = [
+        p for p in others if abs(public[p] - private[p]) >= DECEPTION_THRESHOLD
+    ]
+    if big_gap:
+        return "deception target does not match the gap object"
     fabricated = plan.get("fabricated_event")
-    if _is_verifiable_fabrication(fabricated, view, target):
-        return None
-    return "deception marked without gap or verifiable fabrication"
+    if fabricated is not None:
+        if _is_verifiable_fabrication(fabricated, view, target):
+            return "confirmed"
+        return "fabrication references no verifiable event"
+    return "pending_review"
 
 
 def _plan_complete(plan: dict) -> bool:

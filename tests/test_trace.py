@@ -134,8 +134,8 @@ def test_marked_deception_with_full_plan_is_accepted():
     assert record.fallback_reason is None
 
 
-def test_marked_deception_without_gap_is_rejected():
-    # private == public, no 0.20 gap, no fabrication -> rejected
+def test_marked_deception_without_gap_is_pending_review():
+    # private == public, no 0.20 gap, no structured fabrication -> 待复核
     text = _json(
         private=dict.fromkeys(_OTHERS, 0.3),
         public=dict.fromkeys(_OTHERS, 0.3),
@@ -147,8 +147,25 @@ def test_marked_deception_without_gap_is_rejected():
     bot = LLMBot(0, _FixedProvider(text), PERSONAS["nice"])
     bot.decide(_view(Role.VILLAGER), _vote_request())
     assert bot.latest_record is not None
-    assert bot.latest_record.fallback_reason is not None
-    assert "deception" in bot.latest_record.fallback_reason
+    assert bot.latest_record.fallback_reason is None
+    assert bot.latest_record.deception is False
+    assert bot.latest_record.pending_review is True
+
+
+def test_deception_target_must_match_the_gap_object():
+    # big gap is on P1, but the marked deception target is P2 -> rejected
+    text = _json(
+        private=dict.fromkeys(_OTHERS, 0.1),
+        public={1: 0.9, 2: 0.1, 3: 0.1, 4: 0.1},
+        deception={
+            "active": True, "target": 2, "public_statement": "x",
+            "purpose": "y", "true_basis": "z", "fabricated_event": None,
+        },
+    )
+    bot = LLMBot(0, _FixedProvider(text), PERSONAS["skeptic"])
+    bot.decide(_view(Role.VILLAGER), _vote_request())
+    assert bot.latest_record is not None
+    assert "does not match" in bot.latest_record.fallback_reason
 
 
 def test_deception_target_must_be_a_valid_player():
@@ -236,7 +253,21 @@ def test_wolf_trace_records_threat_delta():
 
 
 def test_fabrication_requires_fact_event_about_target():
-    # gap < 0.20 + fabricated_event with no fact -> rejected
+    # fabricated_event references a non-existent event -> rejected
+    text = _json(
+        private=dict.fromkeys(_OTHERS, 0.3),
+        public=dict.fromkeys(_OTHERS, 0.3),
+        deception={
+            "active": True, "target": 1, "public_statement": "x",
+            "purpose": "y", "true_basis": "z", "fabricated_event": 999,
+        },
+    )
+    bot = LLMBot(0, _FixedProvider(text), PERSONAS["analyst"])
+    bot.decide(_fact_view(), _vote_request())
+    assert bot.latest_record is not None
+    assert "fabrication" in bot.latest_record.fallback_reason
+
+    # fabricated_event has no structured fact -> rejected
     text = _json(
         private=dict.fromkeys(_OTHERS, 0.3),
         public=dict.fromkeys(_OTHERS, 0.3),

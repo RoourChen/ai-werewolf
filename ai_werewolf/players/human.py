@@ -33,7 +33,9 @@ class HumanPlayer(Player):
                 "request": _request_payload(request),
             },
         ))
-        reply = self.channel.recv()
+        reply = self.channel.recv(
+            timeout=30.0 if request.kind is ActionKind.LAST_WORDS else None
+        )
         return _action_from_payload(reply.payload, request)
 
 

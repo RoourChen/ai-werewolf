@@ -20,6 +20,7 @@ from typing import Any
 from ai_werewolf import __version__
 from ai_werewolf.ai.mock import MockProvider
 from ai_werewolf.ai.provider import ModelConfig, OpenAICompatProvider, Provider
+from ai_werewolf.analysis import analyze_decision_quality
 from ai_werewolf.benchmark import run_arena
 from ai_werewolf.copilot.calibration import evaluate_copilot
 from ai_werewolf.domain.events import EventKind, GameEvent
@@ -154,6 +155,7 @@ def cmd_simulate(args: argparse.Namespace) -> int:
     console.rule(f"ai-werewolf simulate — {args.players} 人，seed {args.seed}")
     state = Referee(config, decider, observer=lambda e: _print_event(console, e)).run()
     _print_result(console, state)
+    _print_run_record(console, provider, traces)
     if args.transcript:
         save(record_game_with_traces(state, traces), args.transcript)
         console.print(f"对局已保存到 {args.transcript}（含 {sum(len(t) for t in traces.values())} 条决策轨迹）")
@@ -177,6 +179,7 @@ def cmd_play(args: argparse.Namespace) -> int:
     result = session.result
     assert result is not None
     _print_result(console, result)
+    _print_run_record(console, getattr(session, "provider", None), session.traces)
     console.rule("决策轨迹回放")
     console.print(traces_text(record_session(session)))
     won = result.winner is result.seat(seat).faction
@@ -215,6 +218,15 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 # -------------------------------------------------------------- rendering
+def _print_run_record(console: Any, provider: object, traces: dict) -> None:
+    stats = getattr(provider, "stats", None) if provider is not None else None
+    if stats is not None:
+        console.rule("模型运行记录")
+        for key, value in stats.to_dict().items():
+            console.print(f"  {key}: {value}")
+    console.print(analyze_decision_quality(traces).render())
+
+
 def _print_event(console: Any, event: GameEvent) -> None:
     tag = "" if event.is_public() else "[私密] "
     style = _STYLE.get(event.kind, "")

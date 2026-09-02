@@ -162,12 +162,7 @@ class Referee:
             action = self._ask(request)
             victim = action.target if action.target is not None else legal[0]
         else:
-            tally: dict[int, int] = {}
-            for wolf in wolves:
-                action = self._ask(DecisionRequest(ActionKind.NIGHT_KILL, wolf.id, legal))
-                assert action.target is not None
-                tally[action.target] = tally.get(action.target, 0) + 1
-            victim = _majority(tally, self.state.rng)
+            victim = self._ai_wolf_coordinate(wolves, legal)
         self._emit(
             EventKind.WOLF_KILL,
             self.l10n.msg("wolf.kill", who=self._who(victim)),
@@ -175,6 +170,32 @@ class Referee:
             audience=frozenset(w.id for w in wolves),
         )
         return victim
+
+    def _ai_wolf_coordinate(self, wolves: list, legal: tuple[int, ...]) -> int:
+        """Two AI wolves must agree; if they differ, coordinate once, then
+        fall back to a deterministic seeded choice if still split."""
+        tally = self._collect_wolf_votes(wolves, legal, suggestions=())
+        targets = sorted(tally)
+        if len(targets) == 1:
+            return targets[0]
+        tally2 = self._collect_wolf_votes(wolves, legal, suggestions=tuple(targets))
+        targets2 = sorted(tally2)
+        if len(targets2) == 1:
+            return targets2[0]
+        return _majority(tally2, self.state.rng)
+
+    def _collect_wolf_votes(
+        self, wolves: list, legal: tuple[int, ...], suggestions: tuple[int, ...]
+    ) -> dict[int, int]:
+        tally: dict[int, int] = {}
+        for wolf in wolves:
+            request = DecisionRequest(
+                ActionKind.NIGHT_KILL, wolf.id, legal, suggestions=suggestions
+            )
+            action = self._ask(request)
+            assert action.target is not None
+            tally[action.target] = tally.get(action.target, 0) + 1
+        return tally
 
     def _seer_inspect(self) -> None:
         seers = self.state.living_with_role(Role.SEER)
@@ -341,12 +362,22 @@ class Referee:
         return votes
 
     def _last_words(self, player_id: int) -> None:
+        seat = self.state.seat(player_id)
         action = self._ask(DecisionRequest(ActionKind.LAST_WORDS, player_id))
-        text = (action.text or "").strip()[:800]
-        if text:
+        text = (action.text or "").strip()
+        cap = 200 if seat.is_human else 120
+        text = text[:cap]
+        if not text:
             self._emit(
                 EventKind.LAST_WORDS,
-                f"{self._who(player_id)}（遗言）: {text}",
+                self.l10n.msg("last.words.gave_up", who=self._who(player_id)),
+                actor=player_id,
+                data={"text": "", "gave_up": True},
+            )
+        else:
+            self._emit(
+                EventKind.LAST_WORDS,
+                self.l10n.msg("last.words", who=self._who(player_id), text=text),
                 actor=player_id,
                 data={"text": text},
             )
@@ -393,20 +424,24 @@ class Referee:
                 return self._fallback(request, view)
             return action
         if request.kind is ActionKind.WITCH_POTIONS:
-            heal = bool(action.heal) and request.can_heal
-            if heal:
-                # at most one potion per night; healing takes priority
-                return Action(ActionKind.WITCH_POTIONS, request.actor, heal=True)
-            poison = (
-                action.poison
-                if (
-                    isinstance(action.poison, int)
-                    and request.can_poison
-                    and action.poison in request.legal_targets
-                )
-                else None
+            heal = bool(action.heal)
+            poison = action.poison
+            if heal and poison is not None:
+                return self._fallback(request, view)  # illegal double potion
+            if heal and not request.can_heal:
+                return self._fallback(request, view)  # illegal heal
+            if poison is not None and (
+                not request.can_poison
+                or not isinstance(poison, int)
+                or poison not in request.legal_targets
+            ):
+                return self._fallback(request, view)  # illegal poison
+            return Action(
+                ActionKind.WITCH_POTIONS,
+                request.actor,
+                heal=heal,
+                poison=poison if isinstance(poison, int) else None,
             )
-            return Action(ActionKind.WITCH_POTIONS, request.actor, poison=poison)
         if request.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
             return Action(request.kind, request.actor, text=action.text or "")
         if request.kind is ActionKind.BID:
