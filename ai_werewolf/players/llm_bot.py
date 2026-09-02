@@ -154,12 +154,6 @@ class LLMBot(Player):
                 return "invalid public_suspicion (missing/extra/out-of-range keys)"
 
             private = parse_scores(data.get("private_suspicion"), others) or {}
-            if view.my_role is Role.WEREWOLF:
-                pack = set(view.packmates)
-                for pid, score in private.items():
-                    expected = 1.0 if pid in pack else 0.0
-                    if abs(score - expected) > 0.1:
-                        return "wolf pretended unknown judgment"
 
             if request.kind is ActionKind.WITCH_POTIONS:
                 issue = _validate_witch(data, request)

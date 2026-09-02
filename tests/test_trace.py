@@ -224,14 +224,22 @@ def test_out_of_range_scores_are_rejected():
     assert "private_suspicion" in bot.latest_record.fallback_reason
 
 
-def test_wolf_cannot_pretend_unknown_judgment():
-    text = _json(private=dict.fromkeys(_OTHERS, 0.5))
+def test_wolf_private_is_snapped_to_known_facts():
+    # A wolf that outputs uncertain private suspicion is corrected to 0/1,
+    # not rejected (its knowledge is definitional, not a belief).
+    text = _json(
+        private=dict.fromkeys(_OTHERS, 0.5),
+        public=dict.fromkeys(_OTHERS, 0.5),
+    )
     bot = LLMBot(0, _FixedProvider(text), PERSONAS["chatterbox"])
     bot.decide(_view(Role.WEREWOLF, pack=(2,)), _vote_request())
     record = bot.latest_record
     assert record is not None
-    assert record.fallback_reason is not None
-    assert "wolf pretended" in record.fallback_reason
+    assert record.fallback_reason is None
+    assert record.private_suspicion[2] == 1.0  # packmate
+    assert record.private_suspicion[1] == 0.0
+    assert record.private_suspicion[3] == 0.0
+    assert record.private_suspicion[4] == 0.0
 
 
 def test_record_is_immutable_and_to_dict_copies():
