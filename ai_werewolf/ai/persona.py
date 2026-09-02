@@ -174,7 +174,8 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         f'"deception": {{"active": false|true, "target": <整数编号|null>, '
         f'"public_statement": "<公开说法>", "purpose": "<欺骗目的>", '
         f'"true_basis": "<真实依据>", "fabricated_event": <被编造事件的可见编号|null>}}。'
-        f"任何 public_suspicion 与 private_suspicion 差值≥0.20 都必须 active=true 且 target 为该玩家的整数编号（不要 P 前缀）。"
+        f"默认 public_suspicion 与 private_suspicion 应完全相同；只有当你要故意公开表现出与真实判断不同的怀疑时才让二者不同，此时必须 active=true 且 target=该玩家的整数编号。"
+        f"任何 public 与 private 差值≥0.20 都必须 active=true，且 target 就是产生该差值的那个玩家（例：P3 的 private=0.1 而 public=0.9，则 target=3）。"
         f"三个怀疑分映射（private_suspicion、strategic_threat 及 public_suspicion）必须恰好包含以下每个编号且值为 0-1 数字，不得遗漏、多余或越界：{others}。"
         if lang == "zh"
         else f"Reply with ONLY a JSON object: {action_key}, "
@@ -184,7 +185,8 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         f'"deception": {{"active": false|true, "target": <int id|null>, '
         f'"public_statement": "<public claim>", "purpose": "<purpose>", '
         f'"true_basis": "<true basis>", "fabricated_event": <fabricated visible event id|null>}}.'
-        f" Any public-vs-private gap >= 0.20 must set active=true with target = that player's int id (no P prefix)."
+        f" By default public_suspicion must equal private_suspicion; only when you deliberately show a different suspicion than your true belief may they differ, and then you must set active=true with target = that player's int id."
+        f" Any public-vs-private gap >= 0.20 must set active=true, and target must be the player with that gap (e.g. P3 private=0.1 public=0.9 -> target=3)."
         f" The three suspicion maps (private_suspicion, strategic_threat, public_suspicion) must cover exactly these ids with 0-1 numbers, no missing/extra/out-of-range: {others}."
     )
 
