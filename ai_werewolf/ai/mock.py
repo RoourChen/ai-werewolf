@@ -1,11 +1,11 @@
 """An offline, deterministic provider for tests and CI.
 
 :class:`MockProvider` never touches the network. It reads the structured
-``Prompt.hint`` (actor role, pack, living others, whether the act is public)
-and answers with valid, *consistent* JSON for every decision kind. Werewolf
-actors report known-fact suspicion (1 for packmates, 0 for others); everyone
-else reports a deterministic per-player belief. Public suspicion mirrors
-private suspicion, so the offline path never trips the deception retry.
+``Prompt.hint`` (role, pack, living others, whether the act is public, persona
+dimensions) and answers with valid, consistent JSON. It is persona-aware:
+suspicion is biased by the persona's trust baseline, and werewolf actors frame
+a non-pack player on public acts — producing *real* deception records with a
+≥0.20 public/private gap and a full deception plan.
 """
 
 from __future__ import annotations
@@ -50,6 +50,8 @@ class MockProvider(Provider):
         pack = set(hint.get("pack", []))
         others = [int(p) for p in hint.get("others", [])]
         public = bool(hint.get("public", False))
+        trust = float(hint.get("trust_baseline", 0.5))
+        suggestions = [int(s) for s in hint.get("suggestions", [])]
 
         if kind == "bid":
             return json.dumps({"priority": self.rng.randint(0, 10), "reason": ""})
@@ -60,13 +62,14 @@ class MockProvider(Provider):
             if me_role == "werewolf":
                 private[pid] = 1.0 if pid in pack else 0.0
             else:
-                private[pid] = round(self.rng.random(), 4)
+                base = 1.0 - trust  # low trust -> high suspicion
+                private[pid] = round(min(1.0, max(0.0, base + self.rng.uniform(-0.15, 0.15))), 4)
             threat[pid] = round(self.rng.random(), 4)
 
         payload: dict = {
             "reasoning": "offline heuristic decision.",
             "confidence": 0.7,
-            "evidence": "none",
+            "evidence": None,
             "private_suspicion": private,
             "strategic_threat": threat,
             "deception": {
@@ -75,16 +78,36 @@ class MockProvider(Provider):
                 "public_statement": "",
                 "purpose": "",
                 "true_basis": "",
+                "fabricated_event": None,
             },
         }
         if public:
-            payload["public_suspicion"] = dict(private)
+            public_map = dict(private)  # non-wolves show their true belief
+            if me_role == "werewolf":
+                public_map = dict.fromkeys(others, 0.0)
+                non_pack = [pid for pid in others if pid not in pack]
+                if non_pack:
+                    target = non_pack[0]
+                    public_map[target] = 0.8
+                    payload["deception"] = {
+                        "active": True,
+                        "target": target,
+                        "public_statement": f"我强烈怀疑 P{target} 是狼",
+                        "purpose": "转移火力，掩护狼队",
+                        "true_basis": f"我知道 P{target} 不是狼，但认为他对狼队威胁很高",
+                        "fabricated_event": None,
+                    }
+            payload["public_suspicion"] = public_map
 
         if kind == "statement":
             payload["statement"] = self._statement(candidates, lang)
+        elif kind == "last_words":
+            payload["statement"] = "我的遗言。"
         elif kind == "witch":
             payload["heal"] = False
             payload["poison"] = None
+        elif kind == "pack_confirm":
+            payload["choice"] = suggestions[0] if suggestions else (candidates[0] if candidates else 0)
         else:
             payload["choice"] = self.rng.choice(candidates) if candidates else 0
         return json.dumps(payload, ensure_ascii=False)

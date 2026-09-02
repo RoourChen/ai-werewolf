@@ -2,12 +2,13 @@
 
 The bot builds a persona-aware prompt, calls the model, parses the JSON reply,
 and produces an immutable :class:`~ai_werewolf.domain.trace.DecisionRecord`
-for every decision. The record captures private suspicion, public suspicion
-and strategic threat, plus delta, evidence, confidence, rationale and any
-deception plan.
+for every decision. Output is validated strictly: suspicion maps must be
+exactly the living-other keys with 0..1 numbers, evidence must reference a
+visible event id, wolf knowledge must be 0/1, and deception must target a real
+player with a ≥0.20 public/private gap (or a verifiable fabricated event) plus
+a complete, matching plan.
 
-Output that is inconsistent (e.g. a public/private gap without an explicit
-deception mark) is retried once with a corrective note; a second failure falls
+Invalid output is retried once with a corrective note; a second failure falls
 back to a legal action and is recorded with a fallback reason.
 """
 
@@ -25,40 +26,36 @@ from ai_werewolf.domain.trace import (
     DECEPTION_THRESHOLD,
     DEFAULT_SUSPICION,
     DecisionRecord,
-    clamp_score,
     compute_delta,
     key_player,
-    normalize_scores,
+    parse_number,
+    parse_scores,
 )
 from ai_werewolf.players.base import Player
 
 _PUBLIC_KINDS = {ActionKind.STATEMENT, ActionKind.VOTE}
 _SUSPICION_KINDS = {
     ActionKind.NIGHT_KILL,
+    ActionKind.PACK_CONFIRM,
     ActionKind.NIGHT_INSPECT,
     ActionKind.WITCH_POTIONS,
     ActionKind.STATEMENT,
     ActionKind.VOTE,
 }
 
-_BASE_EVIDENCE = {"none", "vote_pattern", "death", "statement"}
-_ROLE_EVIDENCE = {
-    Role.SEER: {"seer_result"},
-    Role.WITCH: {"witch_attack"},
-    Role.WEREWOLF: {"pack"},
-}
-
 _CORRECTION = {
     "zh": (
         "你上一次的输出被判定为不一致：{issue}。请重新只输出一个合法且一致的 JSON。"
-        "若公开怀疑与私下怀疑的差值 ≥0.20，必须主动标记欺骗并给出完整欺骗计划"
-        "（对象/公开说法/目的/真实依据）；否则不得标记。"
+        "怀疑分必须覆盖每个存活其他玩家且为 0-1 数值；evidence 必须是对局日志中你"
+        "可见的事件编号或 null；若公开与私下怀疑差值 ≥0.20，必须主动标记欺骗并给出"
+        "与该对象一致的完整计划。"
     ),
     "en": (
         "Your previous output was rejected as inconsistent: {issue}. Reply again "
-        "with ONE legal, consistent JSON. If |public - private| >= 0.20 for any "
-        "player you must mark deception and give a full plan "
-        "(target/public claim/purpose/true basis); otherwise do not mark it."
+        "with ONE legal, consistent JSON. Suspicion must cover every living other "
+        "with 0-1 numbers; evidence must be a visible event id or null; if "
+        "|public - private| >= 0.20 for a target you must mark deception with a "
+        "complete, matching plan."
     ),
 }
 
@@ -118,38 +115,39 @@ class LLMBot(Player):
         self.latest_record = record
 
     def _validate(self, request: DecisionRequest, view: PlayerView, data: dict) -> str | None:
-        if request.kind is ActionKind.BID:
+        if request.kind in (ActionKind.BID, ActionKind.LAST_WORDS):
             return None
 
-        evidence = str(data.get("evidence", "none"))
-        if not _evidence_allowed(evidence, view.my_role):
-            return f"unauthorized evidence {evidence!r}"
+        others = view.living_others()
 
-        if view.my_role is Role.WEREWOLF:
-            private = normalize_scores(data.get("private_suspicion"), view.living_others())
-            pack = set(view.packmates)
-            for pid, score in private.items():
-                expected = 1.0 if pid in pack else 0.0
-                if abs(score - expected) > 0.1:
-                    return "wolf pretended unknown judgment"
+        evidence = data.get("evidence")
+        issue = _validate_evidence(evidence, view)
+        if issue is not None:
+            return issue
 
-        if request.kind in _PUBLIC_KINDS:
-            private = normalize_scores(data.get("private_suspicion"), view.living_others())
-            public = normalize_scores(data.get("public_suspicion"), view.living_others())
-            deception = data.get("deception")
-            plan = deception if isinstance(deception, dict) else {}
-            marked = bool(plan.get("active"))
-            plan_complete = _plan_complete(plan)
-            big_gap = any(
-                abs(public[p] - private[p]) >= DECEPTION_THRESHOLD
-                for p in view.living_others()
-            )
-            if big_gap and not marked:
-                return "public/private gap without deception mark"
-            if marked and not big_gap and not plan_complete:
-                return "deception marked without gap or plan"
-            if marked and big_gap and not plan_complete:
-                return "deception marked without complete plan"
+        if request.kind in _SUSPICION_KINDS:
+            if parse_scores(data.get("private_suspicion"), others) is None:
+                return "invalid private_suspicion (missing/extra/out-of-range keys)"
+            if parse_scores(data.get("strategic_threat"), others) is None:
+                return "invalid strategic_threat (missing/extra/out-of-range keys)"
+            if request.kind in _PUBLIC_KINDS and parse_scores(data.get("public_suspicion"), others) is None:
+                return "invalid public_suspicion (missing/extra/out-of-range keys)"
+            if parse_number(data.get("confidence")) is None:
+                return "invalid confidence"
+
+            private = parse_scores(data.get("private_suspicion"), others) or {}
+            if view.my_role is Role.WEREWOLF:
+                pack = set(view.packmates)
+                for pid, score in private.items():
+                    expected = 1.0 if pid in pack else 0.0
+                    if abs(score - expected) > 0.1:
+                        return "wolf pretended unknown judgment"
+
+            if request.kind in _PUBLIC_KINDS:
+                public = parse_scores(data.get("public_suspicion"), others) or {}
+                issue = _validate_deception(data, others, private, public, view)
+                if issue is not None:
+                    return issue
         return None
 
     def _build(
@@ -160,16 +158,24 @@ class LLMBot(Player):
         fallback_reason: str | None,
     ) -> tuple[DecisionRecord, Action]:
         others = view.living_others()
-        private = normalize_scores(data.get("private_suspicion"), others)
-        threat = normalize_scores(data.get("strategic_threat"), others)
-        if view.my_role is Role.WEREWOLF:
-            pack = set(view.packmates)
-            private = {pid: (1.0 if pid in pack else 0.0) for pid in others}
-        public = (
-            normalize_scores(data.get("public_suspicion"), others)
-            if request.kind in _PUBLIC_KINDS
-            else {}
-        )
+        if request.kind in _SUSPICION_KINDS:
+            private = parse_scores(data.get("private_suspicion"), others) or {}
+            threat = parse_scores(data.get("strategic_threat"), others) or {}
+            if view.my_role is Role.WEREWOLF:
+                pack = set(view.packmates)
+                private = {pid: (1.0 if pid in pack else 0.0) for pid in others}
+            public = (
+                parse_scores(data.get("public_suspicion"), others) or {}
+                if request.kind in _PUBLIC_KINDS
+                else {}
+            )
+        else:
+            private = {
+                pid: self._last_private.get(pid, DEFAULT_SUSPICION) for pid in others
+            }
+            threat = dict.fromkeys(others, DEFAULT_SUSPICION)
+            public = {}
+
         delta = compute_delta(self._last_private, private, others)
         self._last_private = dict(private)
 
@@ -177,6 +183,8 @@ class LLMBot(Player):
         plan = deception if isinstance(deception, dict) else {}
         marked = request.kind in _PUBLIC_KINDS and bool(plan.get("active"))
         action = _to_action(request, data, view)
+        evidence = _evidence_text(data.get("evidence"))
+        confidence = parse_number(data.get("confidence")) or 0.5
         record = DecisionRecord(
             day=view.day,
             phase=view.phase.value,
@@ -189,10 +197,10 @@ class LLMBot(Player):
             strategic_threat=threat,
             delta=delta,
             key_player=key_player(delta),
-            evidence=str(data.get("evidence", "none")),
+            evidence=evidence,
             candidates=tuple(request.legal_targets),
             decision=_describe_action(action),
-            confidence=clamp_score(data.get("confidence")),
+            confidence=confidence,
             rationale=str(data.get("reasoning", "")),
             deception=marked,
             deception_plan=_deception_plan(plan) if marked else {},
@@ -237,18 +245,74 @@ class LLMBot(Player):
 
 
 # ---------------------------------------------------------------- helpers
-def _evidence_allowed(evidence: str, role: Role) -> bool:
-    prefix = evidence.split(":", 1)[0]
-    return prefix in (_BASE_EVIDENCE | _ROLE_EVIDENCE.get(role, set()))
+def _validate_evidence(evidence: object, view: PlayerView) -> str | None:
+    if evidence is None:
+        return None
+    if isinstance(evidence, bool):
+        return "invalid evidence"
+    if isinstance(evidence, int):
+        event_id = evidence
+    else:
+        try:
+            event_id = int(str(evidence))
+        except (TypeError, ValueError):
+            return "invalid evidence"
+    if event_id not in {e.id for e in view.events}:
+        return "evidence references unknown event"
+    return None
+
+
+def _evidence_text(evidence: object) -> str:
+    if evidence is None:
+        return "none"
+    if isinstance(evidence, int):
+        return f"E{evidence}"
+    try:
+        return f"E{int(str(evidence))}"
+    except (TypeError, ValueError):
+        return "none"
+
+
+def _validate_deception(
+    data: dict,
+    others: list[int],
+    private: dict[int, float],
+    public: dict[int, float],
+    view: PlayerView,
+) -> str | None:
+    plan = data.get("deception")
+    if not isinstance(plan, dict):
+        return "deception must be an object"
+    marked = bool(plan.get("active"))
+    if not marked:
+        if any(abs(public[p] - private[p]) >= DECEPTION_THRESHOLD for p in others):
+            return "public/private gap without deception mark"
+        return None
+
+    target = plan.get("target")
+    if not (isinstance(target, int) and target in others):
+        return "deception target is not a valid player"
+    if not _plan_complete(plan):
+        return "deception marked without complete plan"
+    gap = abs(public.get(target, 0.0) - private.get(target, 0.0))
+    if gap >= DECEPTION_THRESHOLD:
+        return None
+    fabricated = plan.get("fabricated_event")
+    if _is_visible_event(fabricated, view):
+        return None
+    return "deception marked without gap or verifiable fabrication"
 
 
 def _plan_complete(plan: dict) -> bool:
     return (
-        plan.get("target") is not None
-        and bool(str(plan.get("public_statement", "")).strip())
+        bool(str(plan.get("public_statement", "")).strip())
         and bool(str(plan.get("purpose", "")).strip())
         and bool(str(plan.get("true_basis", "")).strip())
     )
+
+
+def _is_visible_event(event_id: object, view: PlayerView) -> bool:
+    return isinstance(event_id, int) and event_id in {e.id for e in view.events}
 
 
 def _deception_plan(plan: dict) -> dict:
@@ -257,12 +321,13 @@ def _deception_plan(plan: dict) -> dict:
         "public_statement": str(plan.get("public_statement", "")),
         "purpose": str(plan.get("purpose", "")),
         "true_basis": str(plan.get("true_basis", "")),
+        "fabricated_event": plan.get("fabricated_event"),
     }
 
 
 def _describe_action(action: Action) -> str:
-    if action.kind is ActionKind.STATEMENT:
-        return f"statement: {action.text[:40]}"
+    if action.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
+        return f"{action.kind.value}: {action.text[:40]}"
     if action.kind is ActionKind.BID:
         return f"bid {action.priority}"
     if action.kind is ActionKind.WITCH_POTIONS:
@@ -296,10 +361,10 @@ def _to_action(
             else None
         )
         return Action(ActionKind.WITCH_POTIONS, request.actor, heal=heal, poison=poison_target)
-    if request.kind is ActionKind.STATEMENT:
+    if request.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
         statement = data.get("statement")
         return Action(
-            ActionKind.STATEMENT, request.actor, text=str(statement) if statement else "..."
+            request.kind, request.actor, text=str(statement) if statement else "..."
         )
     if request.kind is ActionKind.BID:
         priority = data.get("priority")
@@ -314,14 +379,23 @@ def _to_action(
 
 
 def _fallback(request: DecisionRequest, view: PlayerView) -> Action:
+    if request.kind is ActionKind.PACK_CONFIRM:
+        target = (
+            request.suggestions[0]
+            if request.suggestions and request.suggestions[0] in request.legal_targets
+            else view.rng.choice(list(request.legal_targets))
+        )
+        return Action(ActionKind.PACK_CONFIRM, request.actor, target=target)
     if request.kind in TARGET_ACTIONS and request.legal_targets:
         return Action(
             request.kind,
             request.actor,
             target=view.rng.choice(list(request.legal_targets)),
         )
-    if request.kind is ActionKind.STATEMENT:
-        return Action(ActionKind.STATEMENT, request.actor, text="...")
+    if request.kind is ActionKind.WITCH_POTIONS:
+        return Action(ActionKind.WITCH_POTIONS, request.actor)
+    if request.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
+        return Action(request.kind, request.actor, text="...")
     if request.kind is ActionKind.BID:
         return Action(ActionKind.BID, request.actor, priority=5)
     return Action(request.kind, request.actor)

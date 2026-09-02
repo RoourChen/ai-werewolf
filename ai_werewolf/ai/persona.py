@@ -3,8 +3,9 @@
 Turns a :class:`~ai_werewolf.domain.state.PlayerView`, a persona and a
 :class:`~ai_werewolf.domain.state.DecisionRequest` into a structured
 :class:`~ai_werewolf.ai.provider.Prompt`. The JSON reply schema asks for the
-three suspicion channels (private / public / strategic threat) plus a short
-rationale and an explicit deception plan, so every decision can be traced.
+three suspicion channels (private / public / strategic threat), a short
+rationale, an *event-id* evidence reference and an explicit deception plan, so
+every decision can be traced and audited.
 """
 
 from __future__ import annotations
@@ -19,8 +20,12 @@ from ai_werewolf.i18n import L10n
 
 _ASK: dict[str, tuple[str, str]] = {
     "night_kill": (
-        "现在是夜晚。作为狼人，选择一名存活玩家猎杀。",
-        "It is night. As a werewolf, choose one living player to kill.",
+        "现在是夜晚。作为狼人，提出一个猎杀建议（不能是狼人）。",
+        "It is night. As a werewolf, suggest a victim (not a werewolf).",
+    ),
+    "pack_confirm": (
+        "你的 AI 狼队友已给出建议，请最终确认猎杀目标。",
+        "Your AI packmates suggested targets; confirm the final kill.",
     ),
     "night_inspect": (
         "现在是夜晚。作为预言家，选择一名存活玩家查验阵营。",
@@ -34,6 +39,10 @@ _ASK: dict[str, tuple[str, str]] = {
         "现在是讨论环节。发表一段简短发言（2-4 句）。",
         "It is the discussion phase. Make a short statement (2-4 sentences).",
     ),
+    "last_words": (
+        "你被放逐。请说一句遗言。",
+        "You are lynched. Say your last words.",
+    ),
     "bid": (
         "为发言权竞价，0-10 表示你有多想发言。",
         "Bid for the floor: 0-10, how much do you need to speak?",
@@ -43,8 +52,7 @@ _ASK: dict[str, tuple[str, str]] = {
 _WOLF_RULES = {
     "zh": (
         "你是狼人，必须伪装成村民、必要时撒谎误导。所有狼人都可以撒谎，"
-        "只是欺骗方式与强度不同：按你的人格选择欺骗风格（例如老好人用友善与"
-        "信任感掩盖，激进派用强势指控转移焦点）。绝不要泄露狼队名单。"
+        "只是欺骗方式与强度不同：按你的人格选择欺骗风格。绝不要泄露狼队名单。"
         "你的 private_suspicion 反映你已知的事实：对已知狼人填 1，对已知非狼人填 0；"
         "用 strategic_threat 衡量对方对你狼队的威胁；用 public_suspicion 表演你"
         "想公开表现的怀疑。"
@@ -52,7 +60,7 @@ _WOLF_RULES = {
     "en": (
         "You are a werewolf: disguise yourself and lie when useful. Every wolf may "
         "lie, differing only in style and intensity — follow your persona. Never "
-        "reveal the pack. Your private_suspicion reflects known facts: 1 for known "
+        "reveal the pack. private_suspicion reflects known facts: 1 for known "
         "wolves, 0 for known non-wolves; use strategic_threat for danger to your "
         "pack; use public_suspicion for the doubt you choose to perform."
     ),
@@ -60,16 +68,6 @@ _WOLF_RULES = {
 
 _LANG = {"zh": "请使用简体中文。", "en": "Please answer in English."}
 
-#: Kinds that require the full suspicion JSON.
-_SUSPICION_KINDS = {
-    ActionKind.NIGHT_KILL,
-    ActionKind.NIGHT_INSPECT,
-    ActionKind.WITCH_POTIONS,
-    ActionKind.STATEMENT,
-    ActionKind.VOTE,
-}
-
-#: Kinds whose action is public (they also need public_suspicion).
 _PUBLIC_KINDS = {ActionKind.STATEMENT, ActionKind.VOTE}
 
 
@@ -78,7 +76,7 @@ def build_prompt(view: PlayerView, request: DecisionRequest, persona: Persona) -
     return Prompt(
         system=_system(view, persona, l10n),
         user=_user(view, request, persona, l10n),
-        hint=_hint(view, request),
+        hint=_hint(view, request, persona),
     )
 
 
@@ -93,7 +91,8 @@ def _system(view: PlayerView, persona: Persona, l10n: L10n) -> str:
         f"拉票强度 {persona.lobby_strength}、改票阻力 {persona.vote_resistance}、"
         f"欺骗倾向 {persona.deception_tendency}。\n"
         "决策优先级：游戏合法性 > 阵营获胜目标 > 人格倾向。\n"
-        "只依据你可见的信息行动，不要使用你无权知道的信息。\n"
+        "只依据你可见的信息行动，不要使用你无权知道的信息；evidence 只能引用对局日志里"
+        "你可见的事件编号（E 开头），没有依据就填 null。\n"
         "阵营目标：村民阵营在狼人全灭时获胜；狼人阵营在狼人数达到或超过其余存活玩家时获胜。\n"
         + _LANG[view.language]
     )
@@ -117,6 +116,11 @@ def _user(
         parts.append(
             f"合法目标：{named}。" if view.language == "zh" else f"Legal targets: {named}."
         )
+    if request.suggestions:
+        named = ", ".join(f"P{c}" for c in request.suggestions)
+        parts.append(
+            f"狼队友建议：{named}。" if view.language == "zh" else f"Pack suggestions: {named}."
+        )
     parts.append(_reply_format(view, request))
     return "\n\n".join(p for p in parts if p)
 
@@ -128,6 +132,12 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
             '只回复一个 JSON：{"priority": <0-10 整数>, "reason": "<简短理由>"}。'
             if lang == "zh"
             else 'Reply with ONLY JSON: {"priority": <int 0-10>, "reason": "<short>"}.'
+        )
+    if request.kind is ActionKind.LAST_WORDS:
+        return (
+            '只回复一个 JSON：{"statement": "<你的遗言>"}。'
+            if lang == "zh"
+            else 'Reply with ONLY JSON: {"statement": "<your last words>"}.'
         )
     if request.kind is ActionKind.WITCH_POTIONS:
         action_key = (
@@ -148,13 +158,6 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
             else '{"choice": <player id int>}'
         )
 
-    if request.kind not in _SUSPICION_KINDS:
-        return (
-            f"只回复一个 JSON 对象：{action_key}。"
-            if lang == "zh"
-            else f"Reply with ONLY a JSON object: {action_key}."
-        )
-
     others = "、".join(str(pid) for pid in view.living_others()) or "无"
     public_part = ""
     if request.kind in _PUBLIC_KINDS:
@@ -165,34 +168,46 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         )
     return (
         f"只回复一个 JSON 对象：{action_key}, "
-        f'"reasoning": "<一句话>", "confidence": <0-1>, "evidence": "<短标签>", '
+        f'"reasoning": "<一句话>", "confidence": <0-1>, "evidence": <可见事件编号|null>, '
         f'"private_suspicion": {{<每个存活其他玩家编号>: <0-1>}}{public_part}, '
         f'"strategic_threat": {{<每个存活其他玩家编号>: <0-1>}}, '
         f'"deception": {{"active": false|true, "target": <编号|null>, '
         f'"public_statement": "<公开说法>", "purpose": "<欺骗目的>", '
-        f'"true_basis": "<真实依据>"}}。存活其他玩家编号：{others}。'
+        f'"true_basis": "<真实依据>", "fabricated_event": <被编造事件的可见编号|null>}}。'
+        f"存活其他玩家编号：{others}。"
         if lang == "zh"
         else f"Reply with ONLY a JSON object: {action_key}, "
-        f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": "<short tag>", '
+        f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": <visible event id|null>, '
         f'"private_suspicion": {{<each living other id>: <0-1>}}{public_part}, '
         f'"strategic_threat": {{<each living other id>: <0-1>}}, '
         f'"deception": {{"active": false|true, "target": <id|null>, '
-        f'"public_statement": "<public claim>", "purpose": "<deception purpose>", '
-        f'"true_basis": "<true basis>"}}. Living other ids: {others}.'
+        f'"public_statement": "<public claim>", "purpose": "<purpose>", '
+        f'"true_basis": "<true basis>", "fabricated_event": <fabricated visible event id|null>}}.'
+        f" Living other ids: {others}."
     )
 
 
-def _hint(view: PlayerView, request: DecisionRequest) -> dict:
+def _hint(view: PlayerView, request: DecisionRequest, persona: Persona) -> dict:
     return {
         "kind": request.kind.value,
         "candidates": list(request.legal_targets),
         "lang": view.language,
         "can_heal": request.can_heal,
         "can_poison": request.can_poison,
+        "suggestions": list(request.suggestions),
         "me_role": view.my_role.value,
         "pack": list(view.packmates),
         "others": [pid for pid in view.living if pid != view.me],
         "public": request.kind in _PUBLIC_KINDS,
+        "day": view.day,
+        "event_ids": [e.id for e in view.events],
+        "persona": persona.id,
+        "trust_baseline": persona.trust_baseline,
+        "evidence_sensitivity": persona.evidence_sensitivity,
+        "risk_preference": persona.risk_preference,
+        "lobby_strength": persona.lobby_strength,
+        "vote_resistance": persona.vote_resistance,
+        "deception_tendency": persona.deception_tendency,
     }
 
 
@@ -222,8 +237,9 @@ def _log_block(view: PlayerView) -> str:
     for e in view.events:
         if e.kind in (EventKind.ROLE_DEALT, EventKind.PACK_MATES):
             continue
-        lines.append(("  " if e.is_public() else secret) + e.text)
-    label = "对局日志：" if view.language == "zh" else "Game log:"
+        prefix = f"E{e.id} "
+        lines.append(("  " if e.is_public() else secret) + prefix + e.text)
+    label = "对局日志（E 为事件编号）：" if view.language == "zh" else "Game log (E = event id):"
     if not lines:
         return label + ("（暂无事件）" if view.language == "zh" else " (no events yet)")
     return label + "\n" + "\n".join(lines)

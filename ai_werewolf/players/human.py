@@ -51,6 +51,9 @@ def render_human_prompt(view: PlayerView, request: DecisionRequest) -> str:
     if request.legal_targets:
         named = ", ".join(f"P{c}={view.name(c)}" for c in request.legal_targets)
         lines.append(f"合法目标：{named}")
+    if request.suggestions:
+        named = ", ".join(f"P{c}" for c in request.suggestions)
+        lines.append(f"狼队友建议：{named}")
     if request.kind is ActionKind.WITCH_POTIONS:
         lines.append("可用药水：")
         if request.can_heal:
@@ -64,10 +67,12 @@ def render_human_prompt(view: PlayerView, request: DecisionRequest) -> str:
 
 _ACTION_HINT = {
     "night_kill": "选择猎杀目标。",
+    "pack_confirm": "确认猎杀目标。",
     "night_inspect": "选择查验目标。",
     "witch_potions": "决定是否使用解药/毒药。",
     "vote": "选择放逐目标。",
     "statement": "输入你的发言。",
+    "last_words": "说一句遗言。",
     "bid": "输入竞价（0-10）。",
 }
 
@@ -79,6 +84,7 @@ def _request_payload(request: DecisionRequest) -> dict:
         "legal_targets": list(request.legal_targets),
         "can_heal": request.can_heal,
         "can_poison": request.can_poison,
+        "suggestions": list(request.suggestions),
     }
 
 

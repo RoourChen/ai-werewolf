@@ -30,6 +30,7 @@ class EventKind(str, Enum):
     VOTE = "vote"
     LYNCH = "lynch"
     NO_LYNCH = "no_lynch"
+    LAST_WORDS = "last_words"
     GAME_OVER = "game_over"
 
 
@@ -44,6 +45,8 @@ class GameEvent:
     data: dict = field(default_factory=dict)
     #: ``None`` means public; otherwise only these player ids may see it.
     audience: frozenset[int] | None = None
+    #: Stable unique id within a game, used as an evidence reference.
+    id: int = 0
 
     def is_public(self) -> bool:
         return self.audience is None
@@ -56,6 +59,7 @@ def to_dict(event: GameEvent) -> dict:
     """Serialise one event to a JSON-safe dict (for transport and replay)."""
     return {
         "kind": event.kind.value,
+        "id": event.id,
         "day": event.day,
         "phase": event.phase,
         "text": event.text,

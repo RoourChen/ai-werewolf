@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from ai_werewolf.ai.provider import Provider
+from ai_werewolf.ai.mock import MockProvider
+from ai_werewolf.ai.provider import ModelConfig, OpenAICompatProvider, Provider
 from ai_werewolf.transport.channel import Channel
 
 if TYPE_CHECKING:
@@ -36,6 +37,20 @@ class AIConfig:
     model: str | None = None
     provider: Provider | None = None
 
+    def __post_init__(self) -> None:
+        if self.policy not in ("llm", "random"):
+            raise ValueError(f"unknown AI policy {self.policy!r} (use 'llm' or 'random')")
+
+    def resolve_provider(self, seed: int | None) -> Provider:
+        """Build the provider: explicit provider > model (from env) > mock."""
+        if self.provider is not None:
+            return self.provider
+        if self.model is not None:
+            config = ModelConfig.from_env(env_file=None)
+            config.model = self.model
+            return OpenAICompatProvider(config)
+        return MockProvider(seed=seed or 0)
+
 
 @dataclass
 class RoomConfig:
@@ -50,6 +65,10 @@ class RoomConfig:
     @property
     def human_slots(self) -> int:
         return self.capacity - self.ai.count
+
+    def __post_init__(self) -> None:
+        if self.capacity != 7 or self.ai.count != 6:
+            raise ValueError("MVP rooms must be exactly 7 seats: 1 human + 6 AI")
 
 
 @dataclass

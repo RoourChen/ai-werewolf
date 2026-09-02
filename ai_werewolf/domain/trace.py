@@ -3,17 +3,20 @@
 A :class:`DecisionRecord` is an immutable, append-only record of one AI
 decision. It captures the three suspicion channels (private true suspicion,
 public suspicion, strategic threat), the delta against the previous private
-suspicion, the key object of that change, the authorized evidence, the
-candidate actions, the final decision with confidence and rationale, and an
-optional deception plan.
+suspicion, the key object of that change, an authorized evidence reference,
+the candidate actions, the final decision with confidence and rationale, and
+an optional deception plan.
 
-Records are produced at decision time by the player and appended by the
-orchestration layer; they must never be regenerated or rewritten at game end.
+All dict fields are stored as read-only ``MappingProxyType`` snapshots taken
+at construction time, so a record can never be mutated after it is created —
+neither through the field nor through ``to_dict()``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 DEFAULT_SUSPICION = 0.5
 DECEPTION_THRESHOLD = 0.20
@@ -27,10 +30,10 @@ class DecisionRecord:
     persona: str
     role: str
     kind: str
-    private_suspicion: dict[int, float]
-    public_suspicion: dict[int, float]
-    strategic_threat: dict[int, float]
-    delta: dict[int, float]
+    private_suspicion: Mapping[int, float]
+    public_suspicion: Mapping[int, float]
+    strategic_threat: Mapping[int, float]
+    delta: Mapping[int, float]
     key_player: int | None
     evidence: str
     candidates: tuple[int, ...]
@@ -38,8 +41,15 @@ class DecisionRecord:
     confidence: float
     rationale: str
     deception: bool
-    deception_plan: dict = field(default_factory=dict)
+    deception_plan: Mapping[str, object] = field(default_factory=dict)
     fallback_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "private_suspicion", MappingProxyType(dict(self.private_suspicion)))
+        object.__setattr__(self, "public_suspicion", MappingProxyType(dict(self.public_suspicion)))
+        object.__setattr__(self, "strategic_threat", MappingProxyType(dict(self.strategic_threat)))
+        object.__setattr__(self, "delta", MappingProxyType(dict(self.delta)))
+        object.__setattr__(self, "deception_plan", MappingProxyType(dict(self.deception_plan)))
 
     def to_dict(self) -> dict:
         return {
@@ -49,10 +59,10 @@ class DecisionRecord:
             "persona": self.persona,
             "role": self.role,
             "kind": self.kind,
-            "private_suspicion": self.private_suspicion,
-            "public_suspicion": self.public_suspicion,
-            "strategic_threat": self.strategic_threat,
-            "delta": self.delta,
+            "private_suspicion": dict(self.private_suspicion),
+            "public_suspicion": dict(self.public_suspicion),
+            "strategic_threat": dict(self.strategic_threat),
+            "delta": dict(self.delta),
             "key_player": self.key_player,
             "evidence": self.evidence,
             "candidates": list(self.candidates),
@@ -60,9 +70,48 @@ class DecisionRecord:
             "confidence": self.confidence,
             "rationale": self.rationale,
             "deception": self.deception,
-            "deception_plan": self.deception_plan,
+            "deception_plan": dict(self.deception_plan),
             "fallback_reason": self.fallback_reason,
         }
+
+
+def parse_scores(raw: object, others: list[int]) -> dict[int, float] | None:
+    """Strictly parse a suspicion map.
+
+    Returns a dict keyed by exactly ``others`` with numeric values in [0,1],
+    or ``None`` if any key is missing/extra/duplicated or any value is
+    missing, non-numeric or out of range. JSON string keys are accepted.
+    """
+    if not isinstance(raw, dict):
+        return None
+    expected = set(others)
+    seen: set[int] = set()
+    out: dict[int, float] = {}
+    for key, value in raw.items():
+        try:
+            pid = int(key)
+        except (TypeError, ValueError):
+            return None
+        if pid not in expected or pid in seen:
+            return None
+        seen.add(pid)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        if not 0.0 <= number <= 1.0:
+            return None
+        out[pid] = number
+    if seen != expected:
+        return None
+    return out
+
+
+def parse_number(value: object) -> float | None:
+    """Parse a 0..1 numeric field (e.g. confidence); ``None`` if invalid."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if 0.0 <= number <= 1.0 else None
 
 
 def clamp_score(value: object) -> float:
@@ -72,20 +121,6 @@ def clamp_score(value: object) -> float:
     except (TypeError, ValueError):
         return DEFAULT_SUSPICION
     return min(1.0, max(0.0, number))
-
-
-def normalize_scores(raw: object, others: list[int]) -> dict[int, float]:
-    """Extract per-player scores for ``others``, defaulting missing ones.
-
-    Accepts both int and string keys, since JSON round-trips coerce dict keys
-    to strings.
-    """
-    source = raw if isinstance(raw, dict) else {}
-    out: dict[int, float] = {}
-    for pid in others:
-        value = source.get(pid, source.get(str(pid), DEFAULT_SUSPICION))
-        out[pid] = clamp_score(value)
-    return out
 
 
 def compute_delta(

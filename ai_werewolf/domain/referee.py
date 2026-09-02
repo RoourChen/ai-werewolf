@@ -140,13 +140,34 @@ class Referee:
         wolves = self.state.living_with_role(Role.WEREWOLF)
         if not wolves:
             return None
-        legal = tuple(self.state.living_ids())
-        tally: dict[int, int] = {}
-        for wolf in wolves:
-            action = self._ask(DecisionRequest(ActionKind.NIGHT_KILL, wolf.id, legal))
-            assert action.target is not None
-            tally[action.target] = tally.get(action.target, 0) + 1
-        victim = _majority(tally, self.state.rng)
+        # legal victims are living non-wolves only
+        legal = tuple(
+            s.id for s in self.state.seats if s.alive and s.role is not Role.WEREWOLF
+        )
+        if not legal:
+            return None
+        human_wolves = [w for w in wolves if w.is_human]
+        if human_wolves:
+            suggestions: list[int] = []
+            for wolf in wolves:
+                if wolf in human_wolves:
+                    continue
+                action = self._ask(DecisionRequest(ActionKind.NIGHT_KILL, wolf.id, legal))
+                assert action.target is not None
+                suggestions.append(action.target)
+            human = human_wolves[0]
+            request = DecisionRequest(
+                ActionKind.PACK_CONFIRM, human.id, legal, suggestions=tuple(suggestions)
+            )
+            action = self._ask(request)
+            victim = action.target if action.target is not None else legal[0]
+        else:
+            tally: dict[int, int] = {}
+            for wolf in wolves:
+                action = self._ask(DecisionRequest(ActionKind.NIGHT_KILL, wolf.id, legal))
+                assert action.target is not None
+                tally[action.target] = tally.get(action.target, 0) + 1
+            victim = _majority(tally, self.state.rng)
         self._emit(
             EventKind.WOLF_KILL,
             self.l10n.msg("wolf.kill", who=self._who(victim)),
@@ -178,7 +199,11 @@ class Referee:
         if not witches:
             return False, None
         witch = witches[0]
-        can_heal = not self.state.witch_heal_used and kill is not None
+        can_heal = (
+            not self.state.witch_heal_used
+            and kill is not None
+            and (self.state.day == 1 or kill != witch.id)
+        )
         can_poison = not self.state.witch_poison_used
         if not (can_heal or can_poison):
             return False, None
@@ -210,6 +235,7 @@ class Referee:
                 data={"potion": "heal"},
                 audience=frozenset({witch.id}),
             )
+            return healed, None  # at most one potion per night
         poisoned: int | None = None
         if action.poison is not None and can_poison:
             self.state.witch_poison_used = True
@@ -280,9 +306,28 @@ class Referee:
 
     # --------------------------------------------------------------- voting
     def _voting(self) -> None:
+        votes = self._collect_votes()
+        lynched = tally_lynch(votes)
+        if lynched is None:
+            top = _top_candidates(votes)
+            if len(top) >= 2:
+                re_votes = self._collect_votes(legal_override=top)
+                lynched = tally_lynch(re_votes)
+        if lynched is None:
+            self._emit(EventKind.NO_LYNCH, self.l10n.msg("no.lynch"))
+        else:
+            self._kill_and_announce(lynched, "lynched", "lynch")
+            self._last_words(lynched)
+        self._transition(GamePhase.RESOLUTION)
+
+    def _collect_votes(self, legal_override: list[int] | None = None) -> dict[int, int]:
         votes: dict[int, int] = {}
         for pid in self.state.living_ids():
-            legal = tuple(self.state.living_others(pid))
+            legal = (
+                tuple(legal_override)
+                if legal_override is not None
+                else tuple(self.state.living_others(pid))
+            )
             action = self._ask(DecisionRequest(ActionKind.VOTE, pid, legal))
             assert action.target is not None
             votes[pid] = action.target
@@ -291,13 +336,20 @@ class Referee:
                 self.l10n.msg("vote", who=self._who(pid), target=self._who(action.target)),
                 actor=pid,
                 target=action.target,
+                data={"round": 2 if legal_override is not None else 1},
             )
-        lynched = tally_lynch(votes)
-        if lynched is None:
-            self._emit(EventKind.NO_LYNCH, self.l10n.msg("no.lynch"))
-        else:
-            self._kill_and_announce(lynched, "lynched", "lynch")
-        self._transition(GamePhase.RESOLUTION)
+        return votes
+
+    def _last_words(self, player_id: int) -> None:
+        action = self._ask(DecisionRequest(ActionKind.LAST_WORDS, player_id))
+        text = (action.text or "").strip()[:800]
+        if text:
+            self._emit(
+                EventKind.LAST_WORDS,
+                f"{self._who(player_id)}（遗言）: {text}",
+                actor=player_id,
+                data={"text": text},
+            )
 
     def _resolution(self) -> None:
         if self._check_winner():
@@ -342,6 +394,9 @@ class Referee:
             return action
         if request.kind is ActionKind.WITCH_POTIONS:
             heal = bool(action.heal) and request.can_heal
+            if heal:
+                # at most one potion per night; healing takes priority
+                return Action(ActionKind.WITCH_POTIONS, request.actor, heal=True)
             poison = (
                 action.poison
                 if (
@@ -351,9 +406,9 @@ class Referee:
                 )
                 else None
             )
-            return Action(ActionKind.WITCH_POTIONS, request.actor, heal=heal, poison=poison)
-        if request.kind is ActionKind.STATEMENT:
-            return Action(ActionKind.STATEMENT, request.actor, text=action.text or "")
+            return Action(ActionKind.WITCH_POTIONS, request.actor, poison=poison)
+        if request.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
+            return Action(request.kind, request.actor, text=action.text or "")
         if request.kind is ActionKind.BID:
             priority = action.priority if isinstance(action.priority, int) else 5
             return Action(
@@ -365,6 +420,13 @@ class Referee:
         return action
 
     def _fallback(self, request: DecisionRequest, view: PlayerView) -> Action:
+        if request.kind is ActionKind.PACK_CONFIRM:
+            target = (
+                request.suggestions[0]
+                if request.suggestions and request.suggestions[0] in request.legal_targets
+                else view.rng.choice(list(request.legal_targets))
+            )
+            return Action(ActionKind.PACK_CONFIRM, request.actor, target=target)
         if request.kind in TARGET_ACTIONS and request.legal_targets:
             return Action(
                 request.kind,
@@ -373,8 +435,8 @@ class Referee:
             )
         if request.kind is ActionKind.WITCH_POTIONS:
             return Action(ActionKind.WITCH_POTIONS, request.actor)
-        if request.kind is ActionKind.STATEMENT:
-            return Action(ActionKind.STATEMENT, request.actor, text="...")
+        if request.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
+            return Action(request.kind, request.actor, text="...")
         if request.kind is ActionKind.BID:
             return Action(ActionKind.BID, request.actor, priority=5)
         return Action(request.kind, request.actor)
@@ -450,6 +512,7 @@ class Referee:
             target=target,
             data=data or {},
             audience=audience,
+            id=len(self.state.events),
         )
         self.state.emit(event)
         if self.observer is not None:
@@ -461,3 +524,13 @@ def _majority(tally: dict[int, int], rng: object) -> int:
     best = max(tally.values())
     top = sorted(k for k, v in tally.items() if v == best)
     return top[0] if len(top) == 1 else rng.choice(top)  # type: ignore[attr-defined]
+
+
+def _top_candidates(votes: dict[int, int]) -> list[int]:
+    if not votes:
+        return []
+    counts: dict[int, int] = {}
+    for target in votes.values():
+        counts[target] = counts.get(target, 0) + 1
+    best = max(counts.values())
+    return [target for target, n in counts.items() if n == best]

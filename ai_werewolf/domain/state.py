@@ -34,6 +34,7 @@ class GameConfig:
     max_days: int = 20
     reveal_role_on_death: bool = False
     player_names: list[str] | None = None
+    human_seats: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if len(self.roster) != MVP_SEATS:
@@ -87,7 +88,11 @@ class GameState:
         names = config.player_names or [_default_name(i) for i in range(len(config.roster))]
         roles = list(config.roster)
         rng.shuffle(roles)
-        seats = [Seat(id=i, name=names[i], role=roles[i]) for i in range(len(roles))]
+        human = set(config.human_seats)
+        seats = [
+            Seat(id=i, name=names[i], role=roles[i], is_human=i in human)
+            for i in range(len(roles))
+        ]
         return cls(seats=seats, config=config, rng=rng)
 
     # ---- queries ----------------------------------------------------------
@@ -161,6 +166,7 @@ class DecisionRequest:
     legal_targets: tuple[int, ...] = ()
     can_heal: bool = False
     can_poison: bool = False
+    suggestions: tuple[int, ...] = ()
 
 
 def build_view(state: GameState, player_id: int) -> PlayerView:

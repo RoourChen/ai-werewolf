@@ -68,12 +68,11 @@ class GameSession:
 
         ai_seats = [seat for seat in range(capacity) if seat not in players]
         personas = assign_personas(ai_seats, self.config.seed)
+        provider = self.config.ai.resolve_provider(self.config.seed)
         for seat in ai_seats:
             persona = personas[seat]
             if self.config.ai.policy == "llm":
-                if self.config.ai.provider is None:
-                    raise SessionError("AIConfig.policy='llm' requires AIConfig.provider")
-                players[seat] = LLMBot(seat, self.config.ai.provider, persona)
+                players[seat] = LLMBot(seat, provider, persona)
             else:
                 players[seat] = RandomBot(seat)
             names[seat] = persona.name
@@ -85,6 +84,7 @@ class GameSession:
             language=self.config.language,
             discussion_mode=self.config.discussion_mode,
             player_names=names,  # type: ignore[arg-type]
+            human_seats=tuple(self.humans),
         )
         self.players = players
         self.referee = Referee(game_config, self._decide, observer=self._observe)
