@@ -62,7 +62,7 @@ class ModelConfig:
     api_key: str
     model: str
     temperature: float = 0.8
-    max_tokens: int = 600
+    max_tokens: int = 1200
     timeout: float = 20.0
     thinking: bool = False
     response_format: dict | None = None
@@ -96,7 +96,7 @@ class ModelConfig:
             api_key=api_key,
             model=model,
             temperature=float(os.environ.get("AIWEREWOLF_TEMPERATURE", 0.8)),
-            max_tokens=int(os.environ.get("AIWEREWOLF_MAX_TOKENS", 600)),
+            max_tokens=int(os.environ.get("AIWEREWOLF_MAX_TOKENS", 1200)),
             timeout=float(os.environ.get("AIWEREWOLF_TIMEOUT", 20.0)),
             thinking=os.environ.get("AIWEREWOLF_THINKING", "0") in ("1", "true", "yes"),
             response_format={"type": "json_object"} if json_mode else None,
