@@ -52,7 +52,7 @@ class AIConfig:
             return self.provider
         model = self.model or os.environ.get("AIWEREWOLF_MODEL", "") or None
         if model:
-            config = ModelConfig.from_env(env_file=None)
+            config = ModelConfig.from_env()  # loads .env if present
             config.model = model
             return OpenAICompatProvider(config)
         return MockProvider(seed=seed or 0)

@@ -172,8 +172,8 @@ class OpenAICompatProvider(Provider):
             ],
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
-            # DeepSeek V4 Flash defaults to thinking mode on; send it explicitly.
-            "thinking": self.config.thinking,
+            # DeepSeek expects a ThinkingOptions struct, not a boolean.
+            "thinking": {"type": "enabled" if self.config.thinking else "disabled"},
         }
         if self.config.response_format is not None:
             payload["response_format"] = self.config.response_format

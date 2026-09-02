@@ -107,7 +107,7 @@ def test_openai_provider_sends_thinking_off_explicitly(monkeypatch):
     )
     provider = OpenAICompatProvider(config)
     assert provider.complete(Prompt("sys", "user")) == "ok"
-    assert captured["payload"]["thinking"] is False
+    assert captured["payload"]["thinking"] == {"type": "disabled"}
     assert captured["payload"]["response_format"] == {"type": "json_object"}
     assert "api_key" not in captured["payload"]
     assert captured["headers"]["Authorization"] == "Bearer secret-key"
@@ -137,4 +137,4 @@ def test_openai_provider_can_enable_thinking(monkeypatch):
         base_url="https://api.deepseek.com", api_key="k", model="deepseek-v4-flash", thinking=True
     )
     OpenAICompatProvider(config).complete(Prompt("sys", "user"))
-    assert captured["payload"]["thinking"] is True
+    assert captured["payload"]["thinking"] == {"type": "enabled"}
