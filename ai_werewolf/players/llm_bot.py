@@ -514,6 +514,13 @@ def _parse_json(raw: str) -> dict | None:
                 if result is not None:
                     return result
                 return None
+    # Unbalanced braces: the reply was truncated. Try closing the open braces.
+    candidate = text[start:]
+    open_braces = candidate.count("{") - candidate.count("}")
+    if open_braces > 0:
+        result = _loads_lenient(candidate + "}" * open_braces)
+        if result is not None:
+            return result
     return None
 
 
