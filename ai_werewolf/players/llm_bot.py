@@ -509,9 +509,24 @@ def _parse_json(raw: str) -> dict | None:
         elif text[i] == "}":
             depth -= 1
             if depth == 0:
-                try:
-                    result = json.loads(text[start : i + 1])
-                except json.JSONDecodeError:
-                    return None
-                return result if isinstance(result, dict) else None
+                candidate = text[start : i + 1]
+                result = _loads_lenient(candidate)
+                if result is not None:
+                    return result
+                return None
     return None
+
+
+def _loads_lenient(candidate: str) -> dict | None:
+    try:
+        result = json.loads(candidate)
+    except json.JSONDecodeError:
+        import re
+
+        repaired = re.sub(r",\s*([}\]])$", r"\1", candidate)
+        repaired = re.sub(r",\s*([}\]])$", r"\1", repaired)
+        try:
+            result = json.loads(repaired)
+        except json.JSONDecodeError:
+            return None
+    return result if isinstance(result, dict) else None
