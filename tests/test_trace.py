@@ -67,6 +67,22 @@ def _vote_request() -> DecisionRequest:
     return DecisionRequest(ActionKind.VOTE, 0, legal_targets=(1, 2, 3, 4))
 
 
+def _fact_view() -> PlayerView:
+    seats = tuple(PublicSeat(i, f"P{i}", True) for i in range(5))
+    events = (
+        GameEvent(EventKind.GAME_STARTED, 0, "setup", "start", id=0),
+        GameEvent(
+            EventKind.SEER_RESULT, 0, "night", "P1 是狼人",
+            target=1, data={"is_wolf": True}, audience=frozenset({0}), id=2,
+        ),
+    )
+    return PlayerView(
+        me=0, day=1, phase=GamePhase.VOTING, language="zh", my_role=Role.SEER,
+        seats=seats, living=(0, 1, 2, 3, 4), events=events, secrets=(),
+        rng=random.Random(0),
+    )
+
+
 def test_decision_record_carries_three_channels_and_delta():
     bot = LLMBot(0, _FixedProvider(_json()), PERSONAS["skeptic"])
     bot.decide(_view(Role.VILLAGER), _vote_request())
@@ -204,3 +220,47 @@ def test_record_is_immutable_and_to_dict_copies():
     snapshot["private_suspicion"][0] = 0.99
     assert record.private_suspicion[0] == 0.0
     assert json.loads(json.dumps(record.to_dict()))["deception"] is True
+
+
+def test_wolf_trace_records_threat_delta():
+    from ai_werewolf.ai.mock import MockProvider
+
+    bot = LLMBot(0, MockProvider(seed=0), PERSONAS["aggressor"])
+    view = _view(Role.WEREWOLF, pack=(2,))
+    bot.decide(view, DecisionRequest(ActionKind.STATEMENT, 0))
+    bot.decide(view, _vote_request())
+    record = bot.latest_record
+    assert record is not None
+    assert record.threat_delta
+    assert record.threat_key_player is not None
+
+
+def test_fabrication_requires_fact_event_about_target():
+    # gap < 0.20 + fabricated_event with no fact -> rejected
+    text = _json(
+        private=dict.fromkeys(_OTHERS, 0.3),
+        public=dict.fromkeys(_OTHERS, 0.3),
+        deception={
+            "active": True, "target": 1, "public_statement": "x",
+            "purpose": "y", "true_basis": "z", "fabricated_event": 0,
+        },
+    )
+    bot = LLMBot(0, _FixedProvider(text), PERSONAS["analyst"])
+    bot.decide(_fact_view(), _vote_request())
+    assert bot.latest_record is not None
+    assert "fabrication" in bot.latest_record.fallback_reason
+
+    # gap < 0.20 + fabricated_event = SEER_RESULT about target 1 -> accepted
+    text = _json(
+        private=dict.fromkeys(_OTHERS, 0.3),
+        public=dict.fromkeys(_OTHERS, 0.3),
+        deception={
+            "active": True, "target": 1, "public_statement": "x",
+            "purpose": "y", "true_basis": "z", "fabricated_event": 2,
+        },
+    )
+    bot = LLMBot(0, _FixedProvider(text), PERSONAS["analyst"])
+    bot.decide(_fact_view(), _vote_request())
+    assert bot.latest_record is not None
+    assert bot.latest_record.deception is True
+    assert bot.latest_record.fallback_reason is None

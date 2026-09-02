@@ -42,17 +42,35 @@ def record_game(state: GameState) -> dict:
 
 def record_session(session: object) -> dict:
     """Build a replay dict from a finished session (includes chat + traces)."""
-    state = session.result  # type: ignore[attr-defined]
+    return record_game_with_traces(
+        session.result,  # type: ignore[attr-defined]
+        session.traces,  # type: ignore[attr-defined]
+        human_seats=session.humans,  # type: ignore[attr-defined]
+        persona_map=session.persona_map,  # type: ignore[attr-defined]
+        chat=session.chat,  # type: ignore[attr-defined]
+    )
+
+
+def record_game_with_traces(
+    state: GameState,
+    traces: dict,
+    *,
+    human_seats=( ),
+    persona_map=None,
+    chat=None,
+) -> dict:
+    """Build a replay dict from a state plus its decision traces."""
     replay = record_game(state)
-    replay["human_seats"] = sorted(session.humans)  # type: ignore[attr-defined]
-    replay["persona_map"] = dict(session.persona_map)  # type: ignore[attr-defined]
+    replay["human_seats"] = sorted(human_seats)
+    replay["persona_map"] = dict(persona_map or {})
     replay["chat"] = [
-        {"player": m.player, "kind": m.kind, "body": m.body, "day": m.day}
-        for m in session.chat  # type: ignore[attr-defined]
+        message if isinstance(message, dict)
+        else {"player": message.player, "kind": message.kind, "body": message.body, "day": message.day}
+        for message in (chat or [])
     ]
     replay["traces"] = {
         str(player_id): to_dicts(records)
-        for player_id, records in session.traces.items()  # type: ignore[attr-defined]
+        for player_id, records in (traces or {}).items()
     }
     return replay
 
@@ -122,6 +140,12 @@ def _trace_lines(replay: dict) -> list[str]:
             )
             if record.get("evidence") and record["evidence"] != "none":
                 lines.append(f"      证据 {record['evidence']}")
+            threat_delta = record.get("threat_delta", {})
+            threat_key = record.get("threat_key_player")
+            if threat_key is not None:
+                lines.append(
+                    f"      威胁变化 P{threat_key}: {_fmt(threat_delta, threat_key)}"
+                )
             if record.get("rationale"):
                 lines.append(f"      依据 {record['rationale']}")
             if deception:

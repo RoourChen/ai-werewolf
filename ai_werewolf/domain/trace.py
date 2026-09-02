@@ -43,12 +43,15 @@ class DecisionRecord:
     deception: bool
     deception_plan: Mapping[str, object] = field(default_factory=dict)
     fallback_reason: str | None = None
+    threat_delta: Mapping[int, float] = field(default_factory=dict)
+    threat_key_player: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "private_suspicion", MappingProxyType(dict(self.private_suspicion)))
         object.__setattr__(self, "public_suspicion", MappingProxyType(dict(self.public_suspicion)))
         object.__setattr__(self, "strategic_threat", MappingProxyType(dict(self.strategic_threat)))
         object.__setattr__(self, "delta", MappingProxyType(dict(self.delta)))
+        object.__setattr__(self, "threat_delta", MappingProxyType(dict(self.threat_delta)))
         object.__setattr__(self, "deception_plan", MappingProxyType(dict(self.deception_plan)))
 
     def to_dict(self) -> dict:
@@ -64,6 +67,8 @@ class DecisionRecord:
             "strategic_threat": dict(self.strategic_threat),
             "delta": dict(self.delta),
             "key_player": self.key_player,
+            "threat_delta": dict(self.threat_delta),
+            "threat_key_player": self.threat_key_player,
             "evidence": self.evidence,
             "candidates": list(self.candidates),
             "decision": self.decision,

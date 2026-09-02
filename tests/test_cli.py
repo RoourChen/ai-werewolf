@@ -25,6 +25,16 @@ def test_replay_command_runs(tmp_path):
     assert main(["replay", str(path)]) == 0
 
 
+def test_simulate_saves_traces_in_transcript(tmp_path):
+    import json
+
+    path = tmp_path / "g.json"
+    assert main(["simulate", "--players", "7", "--seed", "1", "--transcript", str(path)]) == 0
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "traces" in data
+    assert data["traces"]  # non-empty decision traces
+
+
 def test_unknown_provider_is_reported(capsys):
     rc = main(["simulate", "--provider", "bogus"])
     assert rc == 1

@@ -22,24 +22,26 @@ from ai_werewolf.ai.mock import MockProvider
 from ai_werewolf.ai.provider import ModelConfig, OpenAICompatProvider, Provider
 from ai_werewolf.benchmark import run_arena
 from ai_werewolf.copilot.calibration import evaluate_copilot
-from ai_werewolf.domain.actions import Action
 from ai_werewolf.domain.events import EventKind, GameEvent
 from ai_werewolf.domain.referee import Referee
 from ai_werewolf.domain.roles import build_roster
-from ai_werewolf.domain.state import DecisionRequest, GameConfig, PlayerView
+from ai_werewolf.domain.state import GameConfig
+from ai_werewolf.domain.trace import DecisionRecord
+from ai_werewolf.players.base import Player
 from ai_werewolf.players.llm_bot import LLMBot
 from ai_werewolf.players.random_bot import RandomBot
 from ai_werewolf.replay.recorder import (
     load as load_replay,
 )
 from ai_werewolf.replay.recorder import (
-    record_game,
+    record_game_with_traces,
     record_session,
     replay_text,
     save,
     traces_text,
 )
 from ai_werewolf.server.room import AIConfig, Room, RoomConfig
+from ai_werewolf.server.session import make_traced_decider
 from ai_werewolf.transport.channel import Envelope
 
 try:  # rich is optional sugar
@@ -133,7 +135,6 @@ class TerminalChannel:
 # ------------------------------------------------------------------ commands
 def cmd_simulate(args: argparse.Namespace) -> int:
     console = _console()
-    provider = None if args.provider == "random" else build_provider(args.provider, seed=args.model_seed)
     config = GameConfig(
         roster=build_roster(args.players),
         seed=args.seed,
@@ -141,17 +142,21 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         discussion_mode="bidding" if args.bidding else "seating",
     )
 
-    def decider(view: PlayerView, request: DecisionRequest) -> Action:
-        if provider is None:
-            return RandomBot(request.actor).decide(view, request)
-        return LLMBot(request.actor, provider).decide(view, request)
+    players: dict[int, Player] = {}
+    if args.provider == "random":
+        players = {pid: RandomBot(pid) for pid in range(args.players)}
+    else:
+        provider = build_provider(args.provider, seed=args.model_seed)
+        players = {pid: LLMBot(pid, provider) for pid in range(args.players)}
+    traces: dict[int, list[DecisionRecord]] = {}
+    decider = make_traced_decider(players, traces)
 
     console.rule(f"ai-werewolf simulate — {args.players} 人，seed {args.seed}")
     state = Referee(config, decider, observer=lambda e: _print_event(console, e)).run()
     _print_result(console, state)
     if args.transcript:
-        save(record_game(state), args.transcript)
-        console.print(f"对局已保存到 {args.transcript}")
+        save(record_game_with_traces(state, traces), args.transcript)
+        console.print(f"对局已保存到 {args.transcript}（含 {sum(len(t) for t in traces.values())} 条决策轨迹）")
     return 0
 
 

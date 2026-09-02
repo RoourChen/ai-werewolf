@@ -77,6 +77,7 @@ class LLMBot(Player):
         self.trace: list[DecisionRecord] = []
         self.latest_record: DecisionRecord | None = None
         self._last_private: dict[int, float] = {}
+        self._last_threat: dict[int, float] = {}
 
     def decide(self, view: PlayerView, request: DecisionRequest) -> Action:
         prompt = build_prompt(view, request, self.persona)
@@ -178,6 +179,8 @@ class LLMBot(Player):
 
         delta = compute_delta(self._last_private, private, others)
         self._last_private = dict(private)
+        threat_delta = compute_delta(self._last_threat, threat, others)
+        self._last_threat = dict(threat)
 
         deception = data.get("deception")
         plan = deception if isinstance(deception, dict) else {}
@@ -197,6 +200,8 @@ class LLMBot(Player):
             strategic_threat=threat,
             delta=delta,
             key_player=key_player(delta),
+            threat_delta=threat_delta,
+            threat_key_player=key_player(threat_delta),
             evidence=evidence,
             candidates=tuple(request.legal_targets),
             decision=_describe_action(action),
@@ -232,6 +237,8 @@ class LLMBot(Player):
             strategic_threat=dict.fromkeys(others, DEFAULT_SUSPICION),
             delta=dict.fromkeys(others, 0.0),
             key_player=None,
+            threat_delta=dict.fromkeys(others, 0.0),
+            threat_key_player=None,
             evidence="none",
             candidates=tuple(request.legal_targets),
             decision=_describe_action(action),
@@ -298,7 +305,7 @@ def _validate_deception(
     if gap >= DECEPTION_THRESHOLD:
         return None
     fabricated = plan.get("fabricated_event")
-    if _is_visible_event(fabricated, view):
+    if _is_verifiable_fabrication(fabricated, view, target):
         return None
     return "deception marked without gap or verifiable fabrication"
 
@@ -311,8 +318,17 @@ def _plan_complete(plan: dict) -> bool:
     )
 
 
-def _is_visible_event(event_id: object, view: PlayerView) -> bool:
-    return isinstance(event_id, int) and event_id in {e.id for e in view.events}
+def _is_verifiable_fabrication(
+    event_id: object, view: PlayerView, target: int
+) -> bool:
+    """A fabrication must reference a visible, fact-bearing event about the
+    deception target (so a text-only claim cannot bypass the gap rule)."""
+    if not isinstance(event_id, int):
+        return False
+    for event in view.events:
+        if event.id == event_id and event.data and event.target == target:
+            return True
+    return False
 
 
 def _deception_plan(plan: dict) -> dict:

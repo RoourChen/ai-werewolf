@@ -87,7 +87,12 @@ class GameSession:
             human_seats=tuple(self.humans),
         )
         self.players = players
-        self.referee = Referee(game_config, self._decide, observer=self._observe)
+        self.traces = {}
+        self.referee = Referee(
+            game_config,
+            make_traced_decider(players, self.traces),
+            observer=self._observe,
+        )
         self.result = self.referee.run()
         self._broadcast(Envelope("result", payload={"result": _result_dict(self.result)}))
         return self.result
@@ -107,15 +112,6 @@ class GameSession:
     def add_spectator(self, channel: Channel) -> None:
         self.spectators.append(channel)
 
-    def _decide(self, view: PlayerView, request: DecisionRequest) -> Action:
-        player = self.players[request.actor]
-        action = player.decide(view, request)
-        # Append-only trace captured at decision time by the orchestration layer.
-        record = getattr(player, "latest_record", None)
-        if record is not None:
-            self.traces.setdefault(request.actor, []).append(record)
-        return action
-
     def _observe(self, event: GameEvent) -> None:
         self.events.append(event)
         if event.is_public():
@@ -130,6 +126,23 @@ class GameSession:
 
 class SessionError(RuntimeError):
     """Raised for invalid session operations."""
+
+
+def make_traced_decider(
+    players: dict[int, Player],
+    traces: dict[int, list[DecisionRecord]],
+):
+    """Wrap per-seat players so every decision's trace is captured append-only."""
+
+    def decider(view: PlayerView, request: DecisionRequest) -> Action:
+        player = players[request.actor]
+        action = player.decide(view, request)
+        record = getattr(player, "latest_record", None)
+        if record is not None:
+            traces.setdefault(request.actor, []).append(record)
+        return action
+
+    return decider
 
 
 def _result_dict(state: GameState) -> dict:
