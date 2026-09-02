@@ -115,6 +115,22 @@ def test_gap_without_mark_is_retried_then_falls_back():
     assert action.target in (1, 2, 3, 4)
 
 
+def test_deception_target_accepts_p_prefix():
+    text = _json(
+        private=dict.fromkeys(_OTHERS, 0.1),
+        public={1: 0.9, 2: 0.1, 3: 0.1, 4: 0.1},
+        deception={
+            "active": True, "target": "P1", "public_statement": "x",
+            "purpose": "y", "true_basis": "z", "fabricated_event": None,
+        },
+    )
+    bot = LLMBot(0, _FixedProvider(text), PERSONAS["skeptic"])
+    bot.decide(_view(Role.VILLAGER), _vote_request())
+    assert bot.latest_record is not None
+    assert bot.latest_record.deception is True
+    assert bot.latest_record.deception_plan["target"] == 1
+
+
 def test_marked_deception_with_full_plan_is_accepted():
     text = _json(
         private=dict.fromkeys(_OTHERS, 0.1),

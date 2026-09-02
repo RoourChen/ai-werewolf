@@ -171,18 +171,20 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         f'"reasoning": "<一句话>", "confidence": <0-1>, "evidence": <可见事件编号整数/数组|null>, '
         f'"private_suspicion": {{<每个存活其他玩家编号>: <0-1>}}{public_part}, '
         f'"strategic_threat": {{<每个存活其他玩家编号>: <0-1>}}, '
-        f'"deception": {{"active": false|true, "target": <编号|null>, '
+        f'"deception": {{"active": false|true, "target": <整数编号|null>, '
         f'"public_statement": "<公开说法>", "purpose": "<欺骗目的>", '
         f'"true_basis": "<真实依据>", "fabricated_event": <被编造事件的可见编号|null>}}。'
+        f"任何 public_suspicion 与 private_suspicion 差值≥0.20 都必须 active=true 且 target 为该玩家的整数编号（不要 P 前缀）。"
         f"三个怀疑分映射（private_suspicion、strategic_threat 及 public_suspicion）必须恰好包含以下每个编号且值为 0-1 数字，不得遗漏、多余或越界：{others}。"
         if lang == "zh"
         else f"Reply with ONLY a JSON object: {action_key}, "
         f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": <visible event id int/array|null>, '
         f'"private_suspicion": {{<each living other id>: <0-1>}}{public_part}, '
         f'"strategic_threat": {{<each living other id>: <0-1>}}, '
-        f'"deception": {{"active": false|true, "target": <id|null>, '
+        f'"deception": {{"active": false|true, "target": <int id|null>, '
         f'"public_statement": "<public claim>", "purpose": "<purpose>", '
         f'"true_basis": "<true basis>", "fabricated_event": <fabricated visible event id|null>}}.'
+        f" Any public-vs-private gap >= 0.20 must set active=true with target = that player's int id (no P prefix)."
         f" The three suspicion maps (private_suspicion, strategic_threat, public_suspicion) must cover exactly these ids with 0-1 numbers, no missing/extra/out-of-range: {others}."
     )
 

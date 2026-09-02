@@ -350,8 +350,8 @@ def _deception_status(
             return "public/private gap without deception mark"
         return "none"
 
-    target = plan.get("target")
-    if not (isinstance(target, int) and target in others):
+    target = _parse_player_id(plan.get("target"))
+    if target is None or target not in others:
         return "deception target is not a valid player"
     if not _plan_complete(plan):
         return "deception marked without complete plan"
@@ -379,6 +379,18 @@ def _plan_complete(plan: dict) -> bool:
     )
 
 
+def _parse_player_id(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().lstrip("Pp")
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def _is_verifiable_fabrication(
     event_id: object, view: PlayerView, target: int
 ) -> bool:
@@ -394,7 +406,7 @@ def _is_verifiable_fabrication(
 
 def _deception_plan(plan: dict) -> dict:
     return {
-        "target": plan.get("target"),
+        "target": _parse_player_id(plan.get("target")),
         "public_statement": str(plan.get("public_statement", "")),
         "purpose": str(plan.get("purpose", "")),
         "true_basis": str(plan.get("true_basis", "")),
