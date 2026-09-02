@@ -92,7 +92,7 @@ ai_werewolf/
 全员可见、私密事件仅对授权玩家可见；非法动作回退到合法候选；相同 seed + 确定性
 策略产生相同结果；新功能放在 server/transport 等应用层，不污染 domain 核心。
 
-详见 [docs/architecture.md](docs/architecture.md)。
+详见 [PRD/03-架构设计.md](PRD/03-架构设计.md)。
 
 ## 接入真实模型 / Real models
 
