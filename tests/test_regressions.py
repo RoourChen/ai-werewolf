@@ -129,6 +129,49 @@ def test_lynched_player_gets_last_words():
     assert last_words and last_words[0].actor == 0
 
 
+def test_human_wolf_confirmation_overrides_suggestion():
+    config = GameConfig(roster=build_roster(7), seed=4)
+    referee = Referee(config, random_decider)
+    wolves = [s for s in referee.state.seats if s.role is Role.WEREWOLF]
+    referee.state.seat(wolves[0].id).is_human = True
+    referee.state.seat(wolves[1].id).is_human = False
+    suggestion = next(s.id for s in referee.state.seats if s.role is Role.VILLAGER)
+    chosen = next(s.id for s in referee.state.seats if s.role is Role.VILLAGER and s.id != suggestion)
+
+    class Script:
+        def __call__(self, view, request):
+            if request.kind is ActionKind.NIGHT_KILL:
+                return Action(ActionKind.NIGHT_KILL, request.actor, target=suggestion)
+            if request.kind is ActionKind.PACK_CONFIRM:
+                return Action(ActionKind.PACK_CONFIRM, request.actor, target=chosen)
+            return random_decider(view, request)
+
+    referee.decider = Script()
+    victim = referee._werewolf_kill()
+    assert victim == chosen  # the human's confirmation wins
+
+
+def test_human_wolf_timeout_falls_back_to_suggestion():
+    config = GameConfig(roster=build_roster(7), seed=4)
+    referee = Referee(config, random_decider)
+    wolves = [s for s in referee.state.seats if s.role is Role.WEREWOLF]
+    referee.state.seat(wolves[0].id).is_human = True
+    referee.state.seat(wolves[1].id).is_human = False
+    suggestion = next(s.id for s in referee.state.seats if s.role is Role.VILLAGER)
+
+    class Script:
+        def __call__(self, view, request):
+            if request.kind is ActionKind.NIGHT_KILL:
+                return Action(ActionKind.NIGHT_KILL, request.actor, target=suggestion)
+            if request.kind is ActionKind.PACK_CONFIRM:
+                raise TimeoutError("human timeout")
+            return random_decider(view, request)
+
+    referee.decider = Script()
+    victim = referee._werewolf_kill()
+    assert victim == suggestion  # deterministic fallback to the AI suggestion
+
+
 # ------------------------------------------------------------- hard constraints
 def test_room_config_enforces_one_human_six_ai():
     with pytest.raises(ValueError):
