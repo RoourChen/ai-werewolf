@@ -59,6 +59,11 @@ _CORRECTION = {
     ),
 }
 
+_JSON_ONLY = {
+    "zh": "请只输出一个合法的 JSON 对象，不要任何解释或多余文字。",
+    "en": "Output ONLY one valid JSON object, with no other text.",
+}
+
 
 class LLMBot(Player):
     """A player whose decisions come from a language model + persona."""
@@ -85,9 +90,13 @@ class LLMBot(Player):
         first_failure: str | None = None
         if data is None:
             first_failure = "unparseable output"
-            record, action = self._build_fallback(
-                request, view, "unparseable output", retried=False, first_failure=first_failure
-            )
+            retried_data = _parse_json(self._call(self._json_only(view, request)))
+            if retried_data is not None and self._validate(request, view, retried_data) is None:
+                record, action = self._build(request, view, retried_data, None, retried=True, first_failure=first_failure)
+            else:
+                record, action = self._build_fallback(
+                    request, view, "unparseable output", retried=True, first_failure=first_failure
+                )
         else:
             issue = self._validate(request, view, data)
             if issue is None:
@@ -115,6 +124,11 @@ class LLMBot(Player):
         prompt = build_prompt(view, request, self.persona)
         correction = _CORRECTION[view.language].format(issue=issue)
         return Prompt(prompt.system, prompt.user + "\n\n" + correction, prompt.hint)
+
+    def _json_only(self, view: PlayerView, request: DecisionRequest) -> Prompt:
+        prompt = build_prompt(view, request, self.persona)
+        note = _JSON_ONLY[view.language]
+        return Prompt(prompt.system, prompt.user + "\n\n" + note, prompt.hint)
 
     def _append(self, record: DecisionRecord) -> None:
         self.trace.append(record)
