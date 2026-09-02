@@ -47,6 +47,7 @@ class DecisionRecord:
     threat_key_player: int | None = None
     retried: bool = False
     pending_review: bool = False
+    first_failure: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "private_suspicion", MappingProxyType(dict(self.private_suspicion)))
@@ -81,6 +82,7 @@ class DecisionRecord:
             "fallback_reason": self.fallback_reason,
             "retried": self.retried,
             "pending_review": self.pending_review,
+            "first_failure": self.first_failure,
         }
 
 

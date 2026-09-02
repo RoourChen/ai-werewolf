@@ -26,9 +26,9 @@ from ai_werewolf.domain.trace import (
     DECEPTION_THRESHOLD,
     DEFAULT_SUSPICION,
     DecisionRecord,
+    clamp_score,
     compute_delta,
     key_player,
-    parse_number,
     parse_scores,
 )
 from ai_werewolf.players.base import Player
@@ -82,19 +82,24 @@ class LLMBot(Player):
     def decide(self, view: PlayerView, request: DecisionRequest) -> Action:
         prompt = build_prompt(view, request, self.persona)
         data = _parse_json(self._call(prompt))
+        first_failure: str | None = None
         if data is None:
-            record, action = self._build_fallback(request, view, "unparseable output", retried=False)
+            first_failure = "unparseable output"
+            record, action = self._build_fallback(
+                request, view, "unparseable output", retried=False, first_failure=first_failure
+            )
         else:
             issue = self._validate(request, view, data)
             if issue is None:
-                record, action = self._build(request, view, data, None, retried=False)
+                record, action = self._build(request, view, data, None, retried=False, first_failure=None)
             else:
+                first_failure = issue
                 retried = _parse_json(self._call(self._corrective(view, request, issue)))
                 if retried is not None and self._validate(request, view, retried) is None:
-                    record, action = self._build(request, view, retried, None, retried=True)
+                    record, action = self._build(request, view, retried, None, retried=True, first_failure=first_failure)
                 else:
                     record, action = self._build_fallback(
-                        request, view, f"retry failed: {issue}", retried=True
+                        request, view, f"retry failed: {issue}", retried=True, first_failure=first_failure
                     )
         self._append(record)
         return action
@@ -133,8 +138,6 @@ class LLMBot(Player):
                 return "invalid strategic_threat (missing/extra/out-of-range keys)"
             if request.kind in _PUBLIC_KINDS and parse_scores(data.get("public_suspicion"), others) is None:
                 return "invalid public_suspicion (missing/extra/out-of-range keys)"
-            if parse_number(data.get("confidence")) is None:
-                return "invalid confidence"
 
             private = parse_scores(data.get("private_suspicion"), others) or {}
             if view.my_role is Role.WEREWOLF:
@@ -164,6 +167,7 @@ class LLMBot(Player):
         fallback_reason: str | None,
         *,
         retried: bool = False,
+        first_failure: str | None = None,
     ) -> tuple[DecisionRecord, Action]:
         others = view.living_others()
         if request.kind in _SUSPICION_KINDS:
@@ -199,7 +203,7 @@ class LLMBot(Player):
         )
         action = _to_action(request, data, view)
         evidence = _evidence_text(data.get("evidence"))
-        confidence = parse_number(data.get("confidence")) or 0.5
+        confidence = clamp_score(data.get("confidence"))
         record = DecisionRecord(
             day=view.day,
             phase=view.phase.value,
@@ -224,11 +228,12 @@ class LLMBot(Player):
             fallback_reason=fallback_reason,
             retried=retried,
             pending_review=(status == "pending_review"),
+            first_failure=first_failure,
         )
         return record, action
 
     def _build_fallback(
-        self, request: DecisionRequest, view: PlayerView, reason: str, *, retried: bool = False
+        self, request: DecisionRequest, view: PlayerView, reason: str, *, retried: bool = False, first_failure: str | None = None
     ) -> tuple[DecisionRecord, Action]:
         others = view.living_others()
         private = {
@@ -262,6 +267,7 @@ class LLMBot(Player):
             deception_plan={},
             fallback_reason=reason,
             retried=retried,
+            first_failure=first_failure,
         )
         return record, action
 

@@ -41,13 +41,16 @@ def record_game(state: GameState) -> dict:
 
 
 def record_session(session: object) -> dict:
-    """Build a replay dict from a finished session (includes chat + traces)."""
+    """Build a replay dict from a finished session (includes chat + traces + stats)."""
+    provider = getattr(session, "provider", None)
+    model_stats = getattr(provider, "stats", None)
     return record_game_with_traces(
         session.result,  # type: ignore[attr-defined]
         session.traces,  # type: ignore[attr-defined]
         human_seats=session.humans,  # type: ignore[attr-defined]
         persona_map=session.persona_map,  # type: ignore[attr-defined]
         chat=session.chat,  # type: ignore[attr-defined]
+        model_stats=model_stats,
     )
 
 
@@ -58,6 +61,7 @@ def record_game_with_traces(
     human_seats=( ),
     persona_map=None,
     chat=None,
+    model_stats=None,
 ) -> dict:
     """Build a replay dict from a state plus its decision traces."""
     replay = record_game(state)
@@ -72,6 +76,7 @@ def record_game_with_traces(
         str(player_id): to_dicts(records)
         for player_id, records in (traces or {}).items()
     }
+    replay["model_stats"] = model_stats.to_dict() if model_stats is not None else None
     return replay
 
 
@@ -121,6 +126,7 @@ def _trace_lines(replay: dict) -> list[str]:
         return []
 
     lines = ["", "=== 决策轨迹（AI 当时为什么怀疑/攻击你）==="]
+    events_by_id = {e.get("id"): e for e in replay.get("events", [])}
     for _player_id, records in traces.items():
         for record in records:
             private = record.get("private_suspicion", {})
@@ -140,6 +146,10 @@ def _trace_lines(replay: dict) -> list[str]:
             )
             if record.get("evidence") and record["evidence"] != "none":
                 lines.append(f"      证据 {record['evidence']}")
+                for event_id in _evidence_ids(record["evidence"]):
+                    event = events_by_id.get(event_id)
+                    if event is not None:
+                        lines.append(f"        ↳ E{event_id}: {event.get('text', '')}")
             threat_delta = record.get("threat_delta", {})
             threat_key = record.get("threat_key_player")
             if threat_key is not None:
@@ -161,3 +171,14 @@ def _trace_lines(replay: dict) -> list[str]:
 
 def _fmt(scores: dict, pid: int) -> object:
     return scores.get(pid, scores.get(str(pid), "—"))
+
+
+def _evidence_ids(evidence: object) -> list[int]:
+    if not isinstance(evidence, str):
+        return []
+    out: list[int] = []
+    for token in evidence.split(","):
+        token = token.strip().lstrip("Ee")
+        if token.isdigit():
+            out.append(int(token))
+    return out

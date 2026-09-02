@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from ai_werewolf.analysis import MIN_PUBLIC_NODES, analyze_decision_quality
+from ai_werewolf.analysis import (
+    MIN_PUBLIC_NODES,
+    analyze_decision_quality,
+    classify_failure,
+)
 from ai_werewolf.domain.trace import DecisionRecord
 
 
@@ -43,3 +47,30 @@ def test_ready_for_tuning_requires_enough_public_nodes():
     traces = {0: [_record() for _ in range(MIN_PUBLIC_NODES)]}
     report = analyze_decision_quality(traces)
     assert report.ready_for_tuning
+
+
+def test_classify_failure_categories():
+    assert classify_failure("unparseable output") == "json_parse"
+    assert classify_failure("invalid private_suspicion (missing/extra/out-of-range keys)") == "suspicion_scores"
+    assert classify_failure("evidence references unknown event") == "evidence"
+    assert classify_failure("illegal double potion") == "illegal_action"
+    assert classify_failure("deception target is not a valid player") == "deception_protocol"
+    assert classify_failure(None) == "none"
+
+
+def test_analyze_transcript_from_saved_dict():
+    from ai_werewolf.analysis import analyze_transcript
+
+    replay = {
+        "traces": {
+            "0": [
+                _record().to_dict(),
+                _record(first_failure="illegal double potion", retried=True, fallback_reason="retry failed: illegal double potion").to_dict(),
+            ]
+        }
+    }
+    report = analyze_transcript(replay)
+    assert report.total == 2
+    assert report.failure_distribution["illegal_action"] == 1
+    assert report.retried == 1
+    assert report.fallback == 1

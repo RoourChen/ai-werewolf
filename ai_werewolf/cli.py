@@ -181,7 +181,11 @@ def cmd_play(args: argparse.Namespace) -> int:
     _print_result(console, result)
     _print_run_record(console, getattr(session, "provider", None), session.traces)
     console.rule("决策轨迹回放")
-    console.print(traces_text(record_session(session)))
+    replay = record_session(session)
+    console.print(traces_text(replay))
+    if args.transcript:
+        save(replay, args.transcript)
+        console.print(f"transcript 已保存到 {args.transcript}（脱敏，不含 API Key）")
     won = result.winner is result.seat(seat).faction
     console.print("你赢了！" if won else "你输了。")
     return 0
@@ -289,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--model", default=None, help="模型名（可选）")
     play.add_argument("--lang", choices=("zh", "en"), default="zh")
     play.add_argument("--bidding", action="store_true")
+    play.add_argument("--transcript", metavar="PATH", default=None, help="保存脱敏 transcript JSON")
     play.set_defaults(func=cmd_play)
 
     arena = sub.add_parser("arena", help="批量评测机器人策略")

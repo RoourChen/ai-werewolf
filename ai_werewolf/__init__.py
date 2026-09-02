@@ -15,7 +15,12 @@ from ai_werewolf.ai.provider import (
     Provider,
     ProviderError,
 )
-from ai_werewolf.analysis import DecisionQualityReport, analyze_decision_quality
+from ai_werewolf.analysis import (
+    DecisionQualityReport,
+    analyze_decision_quality,
+    analyze_transcript,
+    classify_failure,
+)
 from ai_werewolf.benchmark import ArenaReport, run_arena
 from ai_werewolf.copilot.advisor import Advice, Suspicion, advise
 from ai_werewolf.copilot.calibration import CalibrationReport, evaluate_copilot
@@ -56,6 +61,8 @@ __all__ = [
     "MockProvider",
     "DecisionQualityReport",
     "analyze_decision_quality",
+    "analyze_transcript",
+    "classify_failure",
     "NEUTRAL",
     "PERSONAS",
     "Persona",

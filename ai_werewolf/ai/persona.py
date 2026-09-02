@@ -174,7 +174,7 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         f'"deception": {{"active": false|true, "target": <编号|null>, '
         f'"public_statement": "<公开说法>", "purpose": "<欺骗目的>", '
         f'"true_basis": "<真实依据>", "fabricated_event": <被编造事件的可见编号|null>}}。'
-        f"存活其他玩家编号：{others}。"
+        f"三个怀疑分映射（private_suspicion、strategic_threat 及 public_suspicion）必须恰好包含以下每个编号且值为 0-1 数字，不得遗漏、多余或越界：{others}。"
         if lang == "zh"
         else f"Reply with ONLY a JSON object: {action_key}, "
         f'"reasoning": "<one sentence>", "confidence": <0-1>, "evidence": <visible event id int/array|null>, '
@@ -183,7 +183,7 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
         f'"deception": {{"active": false|true, "target": <id|null>, '
         f'"public_statement": "<public claim>", "purpose": "<purpose>", '
         f'"true_basis": "<true basis>", "fabricated_event": <fabricated visible event id|null>}}.'
-        f" Living other ids: {others}."
+        f" The three suspicion maps (private_suspicion, strategic_threat, public_suspicion) must cover exactly these ids with 0-1 numbers, no missing/extra/out-of-range: {others}."
     )
 
 
