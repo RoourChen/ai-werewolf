@@ -533,6 +533,10 @@ def _parse_json_with_diag(raw: str) -> tuple[dict | None, dict]:
         text = text.strip("`")
         if text[:4].lower() == "json":
             text = text[4:]
+    import re
+
+    # Models often emit bare event references like [E29, E30] instead of [29, 30].
+    text = re.sub(r"(?<![A-Za-z0-9_\"])E(\d+)(?![A-Za-z0-9_])", r"\1", text)
     start = text.find("{")
     if start < 0:
         diag["parse_error"] = "no_json_object"
