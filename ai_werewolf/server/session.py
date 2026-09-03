@@ -118,6 +118,13 @@ class GameSession:
         self.events.append(event)
         if event.is_public():
             self._broadcast(Envelope("event", payload={"event": to_dict(event)}))
+        else:
+            for pid in event.audience or ():
+                human = self.humans.get(pid)
+                if human is not None:
+                    human.channel.send(Envelope(
+                        "private_event", payload={"event": to_dict(event)}
+                    ))
 
     def _broadcast(self, envelope: Envelope) -> None:
         for human in self.humans.values():
