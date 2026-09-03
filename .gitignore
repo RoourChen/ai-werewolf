@@ -27,3 +27,6 @@ coverage.xml
 .idea/
 .vscode/
 .DS_Store
+
+# Local acceptance artifacts (kept 30 days, never committed)
+acceptance/

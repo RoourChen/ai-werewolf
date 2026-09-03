@@ -533,10 +533,6 @@ def _parse_json_with_diag(raw: str) -> tuple[dict | None, dict]:
         text = text.strip("`")
         if text[:4].lower() == "json":
             text = text[4:]
-    import re
-
-    # Models often emit bare event references like [E29, E30] instead of [29, 30].
-    text = re.sub(r"(?<![A-Za-z0-9_\"])E(\d+)(?![A-Za-z0-9_])", r"\1", text)
     start = text.find("{")
     if start < 0:
         diag["parse_error"] = "no_json_object"
@@ -585,4 +581,31 @@ def _loads_lenient_diag(candidate: str) -> tuple[dict | None, str, str | None]:
                 return result, "trailing_comma", None
         except json.JSONDecodeError:
             pass
+        normalized = _normalize_event_refs(candidate)
+        if normalized != candidate:
+            try:
+                result = json.loads(normalized)
+                if isinstance(result, dict):
+                    return result, "event_ref", None
+            except json.JSONDecodeError:
+                pass
         return None, "none", f"json_decode:{exc.msg}"
+
+
+def _normalize_event_refs(text: str) -> str:
+    """Normalize bare E{int} tokens ONLY inside evidence / fabricated_event
+    values. String fields (reasoning, public_statement, true_basis, ...) are
+    never touched."""
+    import re
+
+    def fix_value(match: re.Match) -> str:
+        head = match.group(1)
+        value = match.group(2)
+        value = re.sub(r"(?<![0-9A-Za-z_\"])E(\d+)(?![0-9A-Za-z_])", r"\1", value)
+        return head + value
+
+    return re.sub(
+        r'("(?:evidence|fabricated_event)"\s*:\s*)(\[[^\]]*\]|[^,\]}]+)',
+        fix_value,
+        text,
+    )

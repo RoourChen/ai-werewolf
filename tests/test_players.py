@@ -78,3 +78,23 @@ def test_parse_json_handles_fences_and_prose():
     }
     assert _parse_json("no json") is None
     assert _parse_json("") is None
+
+
+def test_bare_event_refs_normalized_only_in_evidence():
+    raw = (
+        '{"choice": 1, "reasoning": "我依据 E29 怀疑他", "confidence": 0.5, '
+        '"evidence": [E29, E30], '
+        '"private_suspicion": {"1": 0.3}, "strategic_threat": {"1": 0.3}, '
+        '"public_suspicion": {"1": 0.3}, '
+        '"deception": {"active": false, "target": null, '
+        '"public_statement": "E29 是狼", "purpose": "x", '
+        '"true_basis": "E29 可疑", "fabricated_event": E29}}'
+    )
+    result = _parse_json(raw)
+    assert result is not None
+    assert result["evidence"] == [29, 30]
+    assert result["deception"]["fabricated_event"] == 29
+    # string fields must be preserved verbatim
+    assert result["reasoning"] == "我依据 E29 怀疑他"
+    assert result["deception"]["public_statement"] == "E29 是狼"
+    assert result["deception"]["true_basis"] == "E29 可疑"
