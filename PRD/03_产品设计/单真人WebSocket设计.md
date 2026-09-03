@@ -56,8 +56,8 @@
 
 | type | 说明 | 关键字段 |
 |---|---|---|
-| `create_room` | 创建房间 | → `room_id` |
-| `join` | 首次入座并鉴权 | `room_id`,`token?` → `seat_id`,`token` |
+| `create_room` | 创建房间（返回一次性 join_secret） | → `room_id`,`join_secret` |
+| `join` | 首次入座并鉴权 | `room_id`,`join_secret` → `seat_id`,`token` |
 | `reconnect` | 断线重连并鉴权 | `room_id`,`seat_id`,`token`,`last_stream_seq` |
 | `start` | 开局（仅房主） | `room_id` |
 | `action` | 提交一个操作 | `request_id`,`client_action_id`,`kind`,`target`/`text`/`heal`/`poison`/`priority` |
@@ -94,7 +94,7 @@
 | `not_finished` | 未终局执行 replay/delete |
 | `seat_taken` | 单真人座位已被占，其他 join 拒绝 |
 | `stale_request` | request_id 不匹配/已过期 |
-| `duplicate_action` | client_action_id 重复 |
+| `duplicate_action` | client_action_id 重复（同 ID 同内容返回缓存结果；同 ID 不同内容回 idempotency_conflict） |
 | `illegal_target` | 目标非法 |
 | `wrong_phase` | 状态机不接受该操作 |
 | `room_capacity_reached` | 活跃房间数达上限 |
@@ -218,6 +218,19 @@ C                       WS/服务端                    对局线程(Referee)
 - 不复制第二套狼人杀规则（复用 `Referee`）。
 - 不做真人账号体系/登录（单机 token 绑定座位）。
 - 不实现“强杀进行中的对局线程”。
+
+## 11. 最终产品决策（已定稿，实现以本节为准）
+
+1. **建房抢座**：`create_room` 返回一次性 `join_secret`；`join` 必须提交它。服务端只保存摘要，验证成功后立即作废并签发正式 `session_token`；不能仅凭 `room_id` 抢真人座位。
+2. **stream_seq 范围**：只分配给需要断线恢复的持久下行消息；含 token 的 `room_created`/`joined`、`ping/pong`、`ai_processing`、普通 `error`、`reconnected` 不进入 append-only 日志；任何 token 不落盘、不回放。
+3. **幂等语义**：相同 `client_action_id` + 相同规范化请求 → 返回第一次的缓存结果，不重复执行；相同 ID + 不同内容 → `idempotency_conflict`。
+4. **重连竞态**：在锁内取 high-watermark，补发 `(last_stream_seq, high-watermark]`，期间新消息先缓冲；补发完成后切到实时流，不丢/不重/不乱序。
+5. **断线宽限不暂停 deadline**：操作先到期就立即确定性兜底；60s 只决定是否还能参与后续操作；超宽限后本局永久自动兜底，只能观战+终局回放。
+6. **action_ack 语义**：仅表示已完成鉴权/合法性检查/入队；规则动作是否最终生效以对应公开/私密事件为准。
+7. **活跃房间统计**：只统计 created/joined/running；finished 立即释放线程与队列容量；未开局房间空闲 10 分钟自动过期。
+8. **运行资源 vs 保留数据**：终局释放运行资源；事件/回放/transcript 用服务端管理的 JSON 文件最多保留 30 天，客户端不能指定路径；不落盘则不得宣称重启后仍保留。
+9. **默认参数**：`MAX_ACTIVE_ROOMS=10`；客户端单条入站消息 ≤16KiB；每连接令牌桶 5 条/秒、突发 10 条；断线宽限与各动作超时进服务端配置、客户端不得覆盖；配置启动时校验、建房间时固化、进行中不变。
+10. **对应测试**：抢座、secret 一次性消费、token 不落日志、真正幂等、幂等冲突、重连期间并发消息、断线不暂停 deadline、空房过期、finished 释放容量、30 天数据清理。
 
 ## 10. 待最终确认的开放点（若仍需）
 
