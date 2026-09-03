@@ -41,6 +41,7 @@ class MockProvider(Provider):
     def __init__(self, seed: int = 0) -> None:
         self.rng = random.Random(seed)
         self.stats = ModelRunStats(provider="mock", model="mock")
+        self.last_diagnostic: dict = {}
 
     def complete(self, prompt: Prompt) -> str:
         hint = prompt.hint
@@ -111,7 +112,14 @@ class MockProvider(Provider):
             payload["choice"] = suggestions[0] if suggestions else (candidates[0] if candidates else 0)
         else:
             payload["choice"] = self.rng.choice(candidates) if candidates else 0
-        return json.dumps(payload, ensure_ascii=False)
+        reply = json.dumps(payload, ensure_ascii=False)
+        self.last_diagnostic = {
+            "finish_reason": "stop",
+            "completion_tokens": 0,
+            "max_tokens": 0,
+            "content_len": len(reply),
+        }
+        return reply
 
     def _statement(self, candidates: list[int], lang: str) -> str:
         pool = _STATEMENTS.get(lang, _STATEMENTS["zh"])

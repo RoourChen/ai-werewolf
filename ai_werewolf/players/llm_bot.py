@@ -83,17 +83,24 @@ class LLMBot(Player):
         self.latest_record: DecisionRecord | None = None
         self._last_private: dict[int, float] = {}
         self._last_threat: dict[int, float] = {}
+        self.json_diagnostics: list[dict] = []
 
     def decide(self, view: PlayerView, request: DecisionRequest) -> Action:
         prompt = build_prompt(view, request, self.persona)
-        data = _parse_json(self._call(prompt))
+        raw = self._call(prompt)
+        data = _parse_json(raw)
         first_failure: str | None = None
         if data is None:
             first_failure = "unparseable output"
-            retried_data = _parse_json(self._call(self._json_only(view, request)))
-            if retried_data is not None and self._validate(request, view, retried_data) is None:
-                record, action = self._build(request, view, retried_data, None, retried=True, first_failure=first_failure)
+            self._record_json_failure(raw)
+            retried_raw = self._call(self._json_only(view, request))
+            retried = _parse_json(retried_raw)
+            if retried is not None and self._validate(request, view, retried) is None:
+                self._mark_last_recovered("retry")
+                record, action = self._build(request, view, retried, None, retried=True, first_failure=first_failure)
             else:
+                if retried is None:
+                    self._record_json_failure(retried_raw)
                 record, action = self._build_fallback(
                     request, view, "unparseable output", retried=True, first_failure=first_failure
                 )
@@ -112,6 +119,20 @@ class LLMBot(Player):
                     )
         self._append(record)
         return action
+
+    def _record_json_failure(self, raw: str) -> None:
+        _, diag = _parse_json_with_diag(raw)
+        full = dict(getattr(self.provider, "last_diagnostic", {}))
+        full.update(diag)
+        full["reached_max_tokens"] = (
+            full.get("finish_reason") == "length"
+            or full.get("completion_tokens", 0) >= full.get("max_tokens", 0)
+        )
+        self.json_diagnostics.append(full)
+
+    def _mark_last_recovered(self, method: str) -> None:
+        if self.json_diagnostics:
+            self.json_diagnostics[-1]["recovered_by"] = method
 
     # ------------------------------------------------------------- internals
     def _call(self, prompt: Prompt) -> str:
@@ -491,9 +512,22 @@ def _fallback(request: DecisionRequest, view: PlayerView) -> Action:
 
 
 def _parse_json(raw: str) -> dict | None:
-    """Extract the first balanced JSON object from a model reply."""
+    result, _ = _parse_json_with_diag(raw)
+    return result
+
+
+def _parse_json_with_diag(raw: str) -> tuple[dict | None, dict]:
+    """Parse a model reply and return (result, diagnostic metadata)."""
+    diag: dict = {
+        "char_count": len(raw),
+        "braces_balanced": raw.count("{") == raw.count("}"),
+        "brackets_balanced": raw.count("[") == raw.count("]"),
+        "parse_error": None,
+        "recovered_by": "none",
+    }
     if not raw:
-        return None
+        diag["parse_error"] = "empty"
+        return None, diag
     text = raw.strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -501,7 +535,8 @@ def _parse_json(raw: str) -> dict | None:
             text = text[4:]
     start = text.find("{")
     if start < 0:
-        return None
+        diag["parse_error"] = "no_json_object"
+        return None, diag
     depth = 0
     for i in range(start, len(text)):
         if text[i] == "{":
@@ -510,30 +545,40 @@ def _parse_json(raw: str) -> dict | None:
             depth -= 1
             if depth == 0:
                 candidate = text[start : i + 1]
-                result = _loads_lenient(candidate)
-                if result is not None:
-                    return result
-                return None
+                result, method, error = _loads_lenient_diag(candidate)
+                diag["recovered_by"] = method
+                diag["parse_error"] = error
+                return (result, diag) if result is not None else (None, diag)
     # Unbalanced braces: the reply was truncated. Try closing the open braces.
     candidate = text[start:]
     open_braces = candidate.count("{") - candidate.count("}")
     if open_braces > 0:
-        result = _loads_lenient(candidate + "}" * open_braces)
-        if result is not None:
-            return result
-    return None
+        result, method, error = _loads_lenient_diag(candidate + "}" * open_braces)
+        diag["recovered_by"] = method or "brace_completion"
+        diag["parse_error"] = error
+        return (result, diag) if result is not None else (None, diag)
+    diag["parse_error"] = "unbalanced"
+    return None, diag
 
 
 def _loads_lenient(candidate: str) -> dict | None:
+    result, _, _ = _loads_lenient_diag(candidate)
+    return result
+
+
+def _loads_lenient_diag(candidate: str) -> tuple[dict | None, str, str | None]:
+    import re
+
     try:
         result = json.loads(candidate)
-    except json.JSONDecodeError:
-        import re
-
+        return (result, "direct", None) if isinstance(result, dict) else (None, "none", "not_a_dict")
+    except json.JSONDecodeError as exc:
         repaired = re.sub(r",\s*([}\]])$", r"\1", candidate)
         repaired = re.sub(r",\s*([}\]])$", r"\1", repaired)
         try:
             result = json.loads(repaired)
+            if isinstance(result, dict):
+                return result, "trailing_comma", None
         except json.JSONDecodeError:
-            return None
-    return result if isinstance(result, dict) else None
+            pass
+        return None, "none", f"json_decode:{exc.msg}"

@@ -160,6 +160,7 @@ class OpenAICompatProvider(Provider):
     def __init__(self, config: ModelConfig) -> None:
         self.config = config
         self.stats = ModelRunStats(provider=self.name, model=config.model)
+        self.last_diagnostic: dict = {}
 
     def complete(self, prompt: Prompt) -> str:
         import httpx  # imported lazily so the offline path needs no dependency
@@ -197,12 +198,19 @@ class OpenAICompatProvider(Provider):
                 resp.raise_for_status()
                 data = resp.json()
                 usage = data.get("usage", {})
+                content = data["choices"][0]["message"]["content"] or ""
+                self.last_diagnostic = {
+                    "finish_reason": data["choices"][0].get("finish_reason", ""),
+                    "completion_tokens": int(usage.get("completion_tokens", 0)),
+                    "max_tokens": self.config.max_tokens,
+                    "content_len": len(content),
+                }
                 self.stats.record_success(
                     latency,
                     int(usage.get("prompt_tokens", 0)),
                     int(usage.get("completion_tokens", 0)),
                 )
-                return data["choices"][0]["message"]["content"] or ""
+                return content
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code if exc.response is not None else 500
                 if status >= 500 and attempt == 1:
