@@ -210,6 +210,9 @@ C                       WS/服务端                    对局线程(Referee)
 
 真实模型人工验收（待本机 Key）：断线重连补发正确、回放可读、超时兜底不中断。
 
+离线人工验收脚本：`ai-werewolf ws-accept`（或 `python -m ai_werewolf.ws_acceptance`），
+用离线 Mock 覆盖完整对局 / 逐类超时 / 断线补发 / 终局回放，不读取、不输出、不保存 Key。
+
 ## 9. 明确不做的范围
 
 - 多真人混房、“谁是 AI”模式。

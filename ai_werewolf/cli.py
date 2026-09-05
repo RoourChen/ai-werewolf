@@ -218,6 +218,16 @@ def cmd_balance(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ws_accept(args: argparse.Namespace) -> int:
+    console = _console()
+    console.rule("ai-werewolf ws-accept — WebSocket 人工验收")
+    from ai_werewolf.ws_acceptance import run_acceptance
+
+    report = run_acceptance()
+    console.print(report.render())
+    return 0 if report.all_passed else 1
+
+
 def cmd_calibrate(args: argparse.Namespace) -> int:
     console = _console()
     console.rule(f"ai-werewolf calibrate — {args.games} 局")
@@ -321,6 +331,9 @@ def build_parser() -> argparse.ArgumentParser:
     balance.add_argument("--seed", type=int, default=0)
     balance.add_argument("--strategy", choices=("llm", "random"), default="llm", help="AI 策略对照")
     balance.set_defaults(func=cmd_balance)
+
+    ws_accept = sub.add_parser("ws-accept", help="WebSocket 人工验收（完整对局/逐类超时/断线补发/终局回放）")
+    ws_accept.set_defaults(func=cmd_ws_accept)
 
     cal = sub.add_parser("calibrate", help="评估 Copilot 概率的 Brier 校准")
     cal.add_argument("--players", type=int, default=7)

@@ -486,7 +486,6 @@ def test_fastapi_adapter_runs_full_game() -> None:
     server = make_server()
     app = create_ws_app(server)
     client = TestClient(app)
-
     assert client.get("/health").json() == {"status": "ok"}
 
     with client.websocket_connect("/ws") as ws:
@@ -515,3 +514,11 @@ def test_fastapi_adapter_runs_full_game() -> None:
                 assert message["data"]["winner"] in ("village", "werewolves")
                 break
     assert counter >= 0
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_ws_acceptance_smoke() -> None:
+    from ai_werewolf.ws_acceptance import run_acceptance
+
+    report = run_acceptance(timeout_seeds=(1,))
+    assert report.all_passed, report.render()
