@@ -32,6 +32,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from ai_werewolf.ai.provider import Provider
@@ -261,6 +262,7 @@ class _Room:
             "deadline_ms": int(timeout_for_kind(kind, self.server.config.timeouts) * 1000),
             "prompt": payload.get("prompt", ""),
             "copilot": payload.get("advice", ""),
+            "copilot_data": payload.get("copilot", {}),
         }
         self._send("decision_request", data, persistent=True, audience=frozenset({self.seat}))
 
@@ -269,7 +271,7 @@ class _Room:
         audience = None if public else frozenset({self.seat})
         if public and event.get("kind") == "game_started":
             self._send("game_started", {
-                "seats": event.get("data", {}).get("seats"),
+                "seats": self._seat_list(),
                 "role_counts": event.get("data", {}).get("role_counts"),
             }, persistent=True, audience=None)
             return
@@ -403,6 +405,16 @@ class _Room:
                 self.log.append(_LogEntry(message["stream_seq"], message, audience))
             if self.connected and self.connection is not None:
                 self.connection.send(json.loads(json.dumps(message)))
+
+    def _seat_list(self) -> list[dict]:
+        """Return the public seat table (name + alive) for the web client."""
+        if self.session is not None and self.session.referee is not None:
+            state = self.session.referee.state
+            return [
+                {"id": s.id, "name": s.name, "alive": s.alive}
+                for s in state.seats
+            ]
+        return []
 
 
 class WsServer:
@@ -643,15 +655,24 @@ def _fallback_label(kind: object) -> str:
 
 # ------------------------------------------------------------- FastAPI
 def create_ws_app(server: WsServer | None = None) -> Any:
-    """Build a FastAPI app with ``/health`` and ``/ws`` (no REST room API)."""
+    """Build a FastAPI app serving the static client, ``/health`` and ``/ws``."""
     if FastAPI is None:  # pragma: no cover - fastapi not installed
         raise RuntimeError(
             "the WebSocket server needs FastAPI; install with `pip install 'ai-werewolf[server]'`"
         )
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
 
     server = server or WsServer()
-    app = FastAPI(title="AI狼人杀 WebSocket")
+    app = FastAPI(title="AI狼人杀")
     app.state.ws_server = server
+
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    @app.get("/", include_in_schema=False)
+    def index() -> Any:
+        return FileResponse(static_dir / "index.html")
 
     @app.get("/health")
     def health() -> dict:

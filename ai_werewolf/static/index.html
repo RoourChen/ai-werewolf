@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI狼人杀</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>AI狼人杀</h1>
+    <div class="status-line"><span id="status">未连接</span><span id="room-info"></span></div>
+  </header>
+
+  <main>
+    <section id="lobby" class="panel">
+      <p>1 名真人 + 6 名不同人格 AI 的 7 人局。</p>
+      <button id="create-btn">创建房间并入座</button>
+      <button id="start-btn" disabled>开始游戏</button>
+      <p id="lobby-note" class="muted"></p>
+    </section>
+
+    <section id="game" class="game-grid" hidden>
+      <aside id="left" class="panel">
+        <div id="phase" class="phase"></div>
+        <div id="role" class="role"></div>
+        <h3>玩家座位</h3>
+        <div id="seats"></div>
+      </aside>
+
+      <section id="center" class="panel">
+        <div id="decision"></div>
+        <h3>对局日志</h3>
+        <div id="log" class="log"></div>
+      </section>
+
+      <aside id="right" class="panel">
+        <div id="copilot"></div>
+      </aside>
+    </section>
+
+    <section id="result" class="panel" hidden>
+      <h2>对局结束</h2>
+      <div id="result-body"></div>
+      <button id="replay-btn">查看回放</button>
+      <div id="replay" class="log" hidden></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

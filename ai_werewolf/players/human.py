@@ -7,7 +7,7 @@ client, a web client or a scripted test double can all drive it identically.
 
 from __future__ import annotations
 
-from ai_werewolf.copilot.advisor import advise
+from ai_werewolf.copilot.advisor import Advice, advise
 from ai_werewolf.domain.actions import Action, ActionKind
 from ai_werewolf.domain.state import DecisionRequest, PlayerView
 from ai_werewolf.players.base import Player
@@ -24,12 +24,14 @@ class HumanPlayer(Player):
         self.channel = channel
 
     def decide(self, view: PlayerView, request: DecisionRequest) -> Action:
+        advice = advise(view)
         self.channel.send(Envelope(
             kind="decision",
             sender=self.player_id,
             payload={
                 "prompt": render_human_prompt(view, request),
-                "advice": advise(view).render(),
+                "advice": advice.render(),
+                "copilot": _advice_payload(advice),
                 "request": _request_payload(request),
             },
         ))
@@ -87,6 +89,24 @@ def _request_payload(request: DecisionRequest) -> dict:
         "can_heal": request.can_heal,
         "can_poison": request.can_poison,
         "suggestions": list(request.suggestions),
+    }
+
+
+def _advice_payload(advice: Advice) -> dict:
+    """Serialize the structured copilot advice for the web client."""
+    return {
+        "day": advice.day,
+        "recommended_vote": advice.recommended_vote,
+        "rationale": advice.rationale,
+        "suspicions": [
+            {
+                "player_id": s.player_id,
+                "name": s.name,
+                "probability": s.probability,
+                "reasons": list(s.reasons),
+            }
+            for s in advice.suspicions
+        ],
     }
 
 

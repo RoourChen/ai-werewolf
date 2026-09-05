@@ -228,6 +228,15 @@ def cmd_ws_accept(args: argparse.Namespace) -> int:
     return 0 if report.all_passed else 1
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from ai_werewolf.server.ws import create_ws_app
+
+    uvicorn.run(create_ws_app(), host=args.host, port=args.port)
+    return 0
+
+
 def cmd_calibrate(args: argparse.Namespace) -> int:
     console = _console()
     console.rule(f"ai-werewolf calibrate — {args.games} 局")
@@ -334,6 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     ws_accept = sub.add_parser("ws-accept", help="WebSocket 人工验收（完整对局/逐类超时/断线补发/终局回放）")
     ws_accept.set_defaults(func=cmd_ws_accept)
+
+    serve = sub.add_parser("serve", help="启动本地 WebSocket 服务（交互页面 + 对局）")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.set_defaults(func=cmd_serve)
 
     cal = sub.add_parser("calibrate", help="评估 Copilot 概率的 Brier 校准")
     cal.add_argument("--players", type=int, default=7)
