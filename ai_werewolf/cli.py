@@ -211,7 +211,9 @@ def cmd_arena(args: argparse.Namespace) -> int:
 def cmd_balance(args: argparse.Namespace) -> int:
     console = _console()
     console.rule("ai-werewolf balance — 离线阵营胜率基线")
-    report = run_balance(n_games_per_seat=args.games, base_seed=args.seed)
+    report = run_balance(
+        n_games_per_seat=args.games, base_seed=args.seed, strategy=args.strategy
+    )
     console.print(report.render())
     return 0
 
@@ -317,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     balance = sub.add_parser("balance", help="离线阵营胜率基线（按阵营/角色/座位/先后手/seed 分层）")
     balance.add_argument("--games", type=int, default=50, help="每个真人座位跑多少局")
     balance.add_argument("--seed", type=int, default=0)
+    balance.add_argument("--strategy", choices=("llm", "random"), default="llm", help="AI 策略对照")
     balance.set_defaults(func=cmd_balance)
 
     cal = sub.add_parser("calibrate", help="评估 Copilot 概率的 Brier 校准")

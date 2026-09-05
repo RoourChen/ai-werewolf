@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ai_werewolf.balance import BalanceReport, run_balance
 
 
@@ -21,6 +23,15 @@ def test_balance_report_is_stratified_and_rule_clean() -> None:
     # every physical seat plays every game
     assert set(report.seat_stats) == {0, 1, 2, 3, 4, 5, 6}
     assert all(games == 21 for games, _ in report.seat_stats.values())
+
+    # seat × role cross-tab: 7 seats, each with all 4 roles
+    assert set(report.seat_role_stats) == {0, 1, 2, 3, 4, 5, 6}
+    for by_role in report.seat_role_stats.values():
+        assert set(by_role) == {"werewolf", "seer", "witch", "villager"}
+
+    # Wilson confidence intervals are well-formed
+    low, high = report.village_ci
+    assert 0.0 <= low <= high <= 1.0
 
     # every human seat was swept equally
     assert set(report.human_seat_stats) == {0, 1, 2, 3, 4, 5, 6}
@@ -47,11 +58,23 @@ def test_single_human_seat_sweep() -> None:
     assert report.human_seat_stats[0][0] == 5
 
 
+def test_random_strategy_control_runs() -> None:
+    report = run_balance(n_games_per_seat=2, base_seed=0, strategy="random")
+    assert report.strategy == "random"
+    assert report.n_games == 14
+    assert report.rule_deviations == []
+
+
+def test_unknown_strategy_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        run_balance(n_games_per_seat=1, strategy="nope")
+
+
 def test_balance_report_renders() -> None:
     report = run_balance(n_games_per_seat=1, base_seed=0)
     text = report.render()
     assert "村民阵营胜率" in text
     assert "狼人阵营胜率" in text
     assert "先后手" in text
-    assert "规则偏差：无" in text
+    assert "规则不变量" in text
     assert isinstance(report, BalanceReport)
