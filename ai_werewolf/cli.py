@@ -21,6 +21,7 @@ from ai_werewolf import __version__
 from ai_werewolf.ai.mock import MockProvider
 from ai_werewolf.ai.provider import ModelConfig, OpenAICompatProvider, Provider
 from ai_werewolf.analysis import analyze_decision_quality
+from ai_werewolf.balance import run_balance
 from ai_werewolf.benchmark import run_arena
 from ai_werewolf.copilot.calibration import evaluate_copilot
 from ai_werewolf.domain.events import EventKind, GameEvent
@@ -207,6 +208,14 @@ def cmd_arena(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_balance(args: argparse.Namespace) -> int:
+    console = _console()
+    console.rule("ai-werewolf balance — 离线阵营胜率基线")
+    report = run_balance(n_games_per_seat=args.games, base_seed=args.seed)
+    console.print(report.render())
+    return 0
+
+
 def cmd_calibrate(args: argparse.Namespace) -> int:
     console = _console()
     console.rule(f"ai-werewolf calibrate — {args.games} 局")
@@ -304,6 +313,11 @@ def build_parser() -> argparse.ArgumentParser:
     arena.add_argument("--provider", default="mock", help="llm 机器人使用的 provider")
     arena.add_argument("--model-seed", type=int, default=0)
     arena.set_defaults(func=cmd_arena)
+
+    balance = sub.add_parser("balance", help="离线阵营胜率基线（按阵营/角色/座位/先后手/seed 分层）")
+    balance.add_argument("--games", type=int, default=50, help="每个真人座位跑多少局")
+    balance.add_argument("--seed", type=int, default=0)
+    balance.set_defaults(func=cmd_balance)
 
     cal = sub.add_parser("calibrate", help="评估 Copilot 概率的 Brier 校准")
     cal.add_argument("--players", type=int, default=7)

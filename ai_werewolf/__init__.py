@@ -21,6 +21,7 @@ from ai_werewolf.analysis import (
     analyze_transcript,
     classify_failure,
 )
+from ai_werewolf.balance import BalanceReport, run_balance
 from ai_werewolf.benchmark import ArenaReport, run_arena
 from ai_werewolf.copilot.advisor import Advice, Suspicion, advise
 from ai_werewolf.copilot.calibration import CalibrationReport, evaluate_copilot
@@ -76,6 +77,8 @@ __all__ = [
     "ProviderError",
     "ArenaReport",
     "run_arena",
+    "BalanceReport",
+    "run_balance",
     "Advice",
     "Suspicion",
     "advise",
