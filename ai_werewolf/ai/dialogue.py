@@ -109,7 +109,12 @@ def _situation(ctx: DialogueContext) -> dict:
     mentioned = _mentioned_ids(ctx)
     contradiction = _contradiction_target(ctx)
     return {
-        "low_info": not ctx.votes and not ctx.questioned_by and ctx.top_suspicion is None,
+        "low_info": (
+            not ctx.votes
+            and not ctx.questioned_by
+            and ctx.top_suspicion is None
+            and _notable_actor(ctx) is None
+        ),
         "questioned": bool(ctx.questioned_by),
         "has_votes": bool(ctx.votes),
         "has_speaker": bool(recent_speakers),
@@ -188,6 +193,15 @@ def _situation_boost(act: str, ctx: DialogueContext, sit: dict) -> float:
 
 
 # ---------------------------------------------------------------- target
+def _notable_actor(ctx: DialogueContext) -> int | None:
+    """低信息/普通场景里“做出了具体行动”的玩家（怀疑/暂投/投/狼），是最值得关注的异常。"""
+    markers = ("怀疑", "暂投", "投", "狼")
+    for s in ctx.recent_statements:
+        if s.actor != ctx.me and any(m in s.text for m in markers):
+            return s.actor
+    return None
+
+
 def _pick_target(ctx: DialogueContext, act: str) -> int | None:
     others = _living_ids(ctx)
     if not others:
@@ -199,37 +213,28 @@ def _pick_target(ctx: DialogueContext, act: str) -> int | None:
         non_pack = [p for p in others_ex_me if p not in ctx.pack]
         if non_pack:
             return _most_threat(ctx, non_pack)
+
+    # 矛盾是明确证据：人格决定“如何处理”，但不能无视它
+    if sit["has_contradiction"] and sit["contradiction"] in others_ex_me:
+        return sit["contradiction"]
+
+    if act == "inform":
+        return None  # 信息不足，无明确怀疑对象
     if act == "defend" and ctx.questioned_by:
         return ctx.questioned_by[0]
-    if act == "analyze" and sit["has_contradiction"]:
-        return sit["contradiction"]
-    if act == "analyze" and sit["has_votes"]:
-        return _most_voted(ctx)
     if act == "support":
         for s in reversed(ctx.recent_statements):
             if s.actor in others_ex_me:
                 return s.actor
         return others_ex_me[0]
-    if act == "accuse":
-        if ctx.top_suspicion in others_ex_me:
-            return ctx.top_suspicion
-        if sit["has_contradiction"]:
-            return sit["contradiction"]
-        if sit["recent_speakers"]:
-            return sit["recent_speakers"][-1]
-        return others_ex_me[0]
-    if act == "question":
-        if sit["has_contradiction"] and sit["contradiction"] in others_ex_me:
-            return sit["contradiction"]  # 追问矛盾核心，而非套模板追问最近发言者
-        for s in reversed(ctx.recent_statements):
-            if s.actor in others_ex_me:
-                return s.actor
-        return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else others_ex_me[0]
-    if act == "inform":
-        return None  # 信息不足，无明确怀疑对象
+
+    # 优先关注“做出异常行动”的玩家，而非随便一个发言者
+    notable = _notable_actor(ctx)
+    if notable in others_ex_me and act in ("question", "accuse", "analyze", "lobby", "mediate"):
+        return notable
     if act == "mediate":
-        return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else (_most_voted(ctx) or others_ex_me[0])
-    return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else others_ex_me[0]
+        return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else (_most_voted(ctx) or None)
+    return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else None
 
 
 def _most_threat(ctx: DialogueContext, candidates: list[int]) -> int:
@@ -302,6 +307,8 @@ def compose_statement(ctx: DialogueContext, rng: random.Random) -> dict:
 
     target = _pick_target(ctx, act)
     statement = _compose_line(ctx, act, target, rng)
+    if ctx.persona_id == "chatterbox" and target is not None:
+        statement += _chatter_flourish(ctx, rng)
     claim = _claim_for(ctx, act, target)
     changed = _stance_changed(ctx, target)
     return {
@@ -326,6 +333,9 @@ def _compose_line(ctx: DialogueContext, act: str, target: int | None, rng: rando
 
     if _situation(ctx)["low_info"]:
         return _low_info_line(ctx, act, rng)
+
+    if target is None:
+        return f"{opener}，目前信息不足，我先观察。"
 
     if act == "inform":
         return f"{opener}，目前信息不足，我先听一轮再表态。"
@@ -391,39 +401,45 @@ def _style_analyze(ctx: DialogueContext, c: int, vtarget: str, rng: random.Rando
     return f"{opener}，{cname} 的票和发言对不上。"
 
 
+def _chatter_flourish(ctx: DialogueContext, rng: random.Random) -> str:
+    """话痨的“加长”必须来自有效信息：回应第二个玩家 + 情绪 + 暂时结论。"""
+    others = [s.actor for s in ctx.recent_statements if s.actor != ctx.me]
+    emotions = ["说实话我有点纠结", "哎呀这局面越看越乱", "我心里其实没底"]
+    emotion = rng.choice(emotions)
+    if others:
+        return f"，{emotion}；另外 P{others[0]} 刚才的话我也记下了，先不下结论。"
+    return f"，{emotion}；大家也一起说说。"
+
+
 def _wolf_mislead(ctx: DialogueContext, act: str, target: int, rng: random.Random) -> str:
+    """六种狼人欺骗策略：由人格决定，而非由 speech_act 决定。"""
     voice = _VOICE.get(ctx.persona_id, _VOICE["mediator"])
     opener = rng.choice(voice["openers"])
     name = _pname(ctx, target)
     voted_by = [v.actor for v in ctx.votes if v.target == target]  # 真实事实：谁投了 target
-    has_stmt = any(s.actor == target for s in ctx.recent_statements)
-    if act == "lobby":
-        return f"{opener}，跟我投 {name}，别分散。"
-    if act == "mediate":
-        return f"{opener}，我建议统一投 {name}，别让狼人混过去。"
-    if act == "analyze":
-        style = voice["style"]
+    persona = ctx.persona_id
+
+    if persona == "skeptic":
+        # 诱导目标自证
+        return f"{opener}，{name} 你最好自己解释清楚，这个票为什么这样？"
+    if persona == "nice":
+        # 假装保留、温和推票
+        return f"{opener}，{name} 我本来不想怀疑你，但这个票有点说不过去，先投你吧。"
+    if persona == "analyst":
+        # 包装成票型推理
         if voted_by:
             voters = "、".join(f"P{a}" for a in voted_by)
-            if style == "analytical":
-                return f"{opener}，第一，{voters} 投了 {name}；第二，这个票值得怀疑。"
-            if style == "chatty":
-                return f"{opener}，{voters} 投了 {name}，这个票我越看越觉得可疑，大家多留意。"
-            if style == "friendly":
-                return f"{opener}，{voters} 投了 {name}，可能有点问题，但我也说不好。"
-            if style == "mediating":
-                return f"{opener}，{voters} 投了 {name}，我们先把这一点弄清楚。"
-            return f"{opener}，从票型看，{voters} 投了 {name}，这个票值得怀疑。"
-        return f"{opener}，我怀疑 {name} 是狼，虽然目前证据不足。"
-    if act == "accuse":
-        if voted_by:
-            voters = "、".join(f"P{a}" for a in voted_by)
-            return f"{opener}，{name} 被 {voters} 投过，很可疑。"
-        return f"{opener}，{name} 很可疑，我怀疑是狼。"
-    if act == "question":
-        if has_stmt:
-            return f"{opener}，{name} 你刚才的话有点问题，能再解释吗？"
-        return f"{opener}，{name} 我很怀疑，你怎么看？"
+            return f"{opener}，从票型推理：{voters} 投了 {name}，这是我整理的结论。"
+        return f"{opener}，从现有线索推理，{name} 最可疑。"
+    if persona == "aggressor":
+        # 强势号票
+        return f"{opener}，别犹豫，{name} 就是狼，跟我投。"
+    if persona == "mediator":
+        # 以统一票型为由推动
+        return f"{opener}，为了统一票型，我建议大家投 {name}。"
+    if persona == "chatterbox":
+        # 制造情绪和多方压力
+        return f"{opener}，{name} 这个票我真的越想越慌，大家也一起看看，别让狼混过去！"
     return f"{opener}，{name} 值得大家多注意。"
 
 

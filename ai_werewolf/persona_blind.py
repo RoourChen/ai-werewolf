@@ -149,8 +149,8 @@ def generate_persona(scenario: dict, persona_id: str, seed: int) -> list[dict]:
     # turn 3：投票（= 当前怀疑；若之前“先观察/不强推”却现在投票，需说明）
     d3 = _call(provider, _hint(scenario, persona_id, "vote", recent2, votes, suspicion, my_last, qb))
     if suspicion is None:
-        suspicion = 0  # 无明确怀疑时只能投一个候选，并说明
-        d3["change_reason"] = "虽然之前保留，但当前只能在候选中投 P0"
+        suspicion = 0
+        d3["change_reason"] = "信息不足，但必须投票，低置信度选择 P0"
     turns.append(_turn(d3, "vote", suspicion))
     return turns
 
