@@ -295,14 +295,15 @@ def compose_statement(ctx: DialogueContext, rng: random.Random) -> dict:
     target = _pick_target(ctx, act)
     statement = _compose_line(ctx, act, target, rng)
     claim = _claim_for(ctx, act, target)
+    changed = _stance_changed(ctx, target)
     return {
         "speech_act": act,
         "target": target,
         "claim": claim,
         "evidence": None,
         "intended_vote": target if act in ("accuse", "lobby") else None,
-        "stance_changed": _stance_changed(ctx, target),
-        "change_reason": "依据本轮票型和发言调整" if target is not None else None,
+        "stance_changed": changed,
+        "change_reason": _change_reason(ctx, act, target) if changed else None,
         "statement": statement,
     }
 
@@ -398,6 +399,26 @@ def _claim_for(ctx: DialogueContext, act: str, target: int | None) -> str:
 
 def _stance_changed(ctx: DialogueContext, target: int | None) -> bool:
     return target is not None and ctx.my_last_statement is not None and f"P{target}" not in ctx.my_last_statement
+
+
+def _change_reason(ctx: DialogueContext, act: str, target: int | None) -> str | None:
+    if target is None:
+        return None
+    if act == "analyze":
+        return f"发现 P{target} 的票和发言对不上"
+    if act == "accuse":
+        return f"P{target} 的票可疑"
+    if act == "question":
+        return f"想追问 P{target} 的依据"
+    if act == "lobby":
+        return f"想推动放逐 P{target}"
+    if act == "mediate":
+        return f"为统一票型，建议归票 P{target}"
+    if act == "defend":
+        return "回应质疑，澄清自己的判断来源"
+    if act == "support":
+        return f"认可 P{target} 的判断"
+    return f"重新评估 P{target}"
 
 
 def _pname(ctx: DialogueContext, pid: int | None) -> str:

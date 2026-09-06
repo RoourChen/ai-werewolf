@@ -212,11 +212,29 @@ def shuffle_labels(seed: int) -> list[str]:
 
 # ---------------------------------------------------------------- render
 _SCENARIO_TITLE = {
-    "S1_第一日信息不足": "场景一：第一日信息不足（初步发言）",
-    "S2_被质疑": "场景二：被其他玩家质疑（需要回应）",
-    "S3_票型矛盾": "场景三：发现发言与票型矛盾（需要归票）",
-    "S4_狼人欺骗": "场景四：狼人欺骗（拿到狼人后如何误导）",
+    "S1_第一日信息不足": "场景一",
+    "S2_被质疑": "场景二",
+    "S3_票型矛盾": "场景三",
+    "S4_狼人欺骗": "场景四",
 }
+
+
+def _scenario_preamble(sid: str) -> str:
+    """场景的共享事实（所有 A–F 面对完全相同的这些事实）。"""
+    sc = SCENARIOS[sid]
+    role_name = {"villager": "村民", "werewolf": "狼人"}[sc["role"]]
+    lines = [f"第 {sc['day']} 天；本场景你的身份：{role_name}。"]
+    if sc["scripted_statements"]:
+        lines.append("此前其他玩家已发言：")
+        for s in sc["scripted_statements"]:
+            lines.append(f"- P{s['actor']}：{s['text']}")
+    if sc["scripted_votes"]:
+        lines.append("此前的投票：")
+        for v in sc["scripted_votes"]:
+            lines.append(f"- 第 {v['day']} 天 P{v['actor']} 投了 P{v['target']}")
+    else:
+        lines.append("此前投票：无。")
+    return "\n".join(lines)
 
 
 def _render_turns(turns: list[dict]) -> str:
@@ -252,6 +270,8 @@ def render_questions(run: BlindRun, shuffle_seed: int) -> str:
     ]
     for sid, personas in run.scenarios.items():
         parts.append("## " + _SCENARIO_TITLE[sid])
+        parts.append("")
+        parts.append(_scenario_preamble(sid))
         parts.append("")
         for pid in labels:
             label = label_names[pid]
