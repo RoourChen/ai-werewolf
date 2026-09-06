@@ -163,7 +163,7 @@ def _call(provider: MockProvider, hint: dict) -> dict:
     return data
 
 
-_SUSPICIOUS_ACTS = {"accuse", "lobby", "question", "analyze"}
+_SUSPICIOUS_ACTS = {"accuse", "lobby", "mediate", "analyze", "question"}
 
 
 def _suspicion_from(d: dict) -> int | None:
@@ -265,9 +265,9 @@ def _render_turns(turns: list[dict]) -> str:
             if t["stance_changed"] and t["change_reason"]:
                 lines.append(f"      （较之前改口，理由：{t['change_reason']}）")
             if t["top_suspicion"] is not None:
-                lines.append(f"      当前怀疑：P{t['top_suspicion']}")
+                lines.append(f"      公开怀疑：P{t['top_suspicion']}")
         else:
-            lines.append(f"  第{i}轮投票：P{t['vote']}；当前怀疑 P{t['top_suspicion']}")
+            lines.append(f"  第{i}轮投票：P{t['vote']}；公开怀疑 P{t['top_suspicion']}")
     return "\n".join(lines)
 
 

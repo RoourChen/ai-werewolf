@@ -104,3 +104,35 @@ def test_no_fabricated_attribution() -> None:
                 assert "分析有漏洞" not in turn["statement"]
                 assert "立场" not in turn["statement"]
                 assert "带节奏" not in turn["statement"]
+
+
+def test_vote_chain_consistent() -> None:
+    """跨阶段不变量：最终投票 == 公开怀疑；改口必须有 change_reason。"""
+    run = generate(seed=20260906)
+    for sid, personas in run.scenarios.items():
+        for pid, turns in personas.items():
+            assert turns[2]["vote"] == turns[2]["top_suspicion"], \
+                f"{sid} {pid}: vote {turns[2]['vote']} != suspicion {turns[2]['top_suspicion']}"
+            if (
+                turns[2]["vote"] != turns[1]["top_suspicion"]
+                and turns[1]["top_suspicion"] is not None
+            ):
+                assert turns[2].get("change_reason"), f"{sid} {pid}: vote changed without reason"
+
+
+def test_no_sudden_vote_without_reason() -> None:
+    """“先观察/不表态”不能在没有新证据时立即变成确定投票（需 change_reason）。"""
+    run = generate(seed=20260906)
+    conservative = {"inform", "support", "defend", "mediate"}
+    for sid, personas in run.scenarios.items():
+        for pid, turns in personas.items():
+            if turns[1]["speech_act"] in conservative and turns[1]["top_suspicion"] is None:
+                assert turns[2].get("change_reason"), f"{sid} {pid}: sudden vote without reason"
+
+
+def test_wolf_public_suspicion_is_mislead() -> None:
+    """狼人公开怀疑必须是误导（指向非狼队友），与私下已知分离。"""
+    run = generate(seed=20260906)
+    for pid, turns in run.scenarios["S4_狼人欺骗"].items():
+        for turn in turns:
+            assert turn["top_suspicion"] not in (1, 2), f"{pid}: wolf suspects packmate"

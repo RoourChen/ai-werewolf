@@ -276,6 +276,10 @@ def _low_info_line(ctx: DialogueContext, act: str, rng: random.Random) -> str:
     return f"{opener}，目前信息不足，我先听一轮再表态。"
 
 
+# 带“目标/投票意图”的行为：目标即 public_suspicion 最高对象与 intended_vote
+_VOTE_ACTS = {"accuse", "lobby", "mediate", "analyze", "question"}
+
+
 def compose_statement(ctx: DialogueContext, rng: random.Random) -> dict:
     sit = _situation(ctx)
     weights = SPEECH_WEIGHTS.get(ctx.persona_id, SPEECH_WEIGHTS["mediator"])
@@ -305,7 +309,7 @@ def compose_statement(ctx: DialogueContext, rng: random.Random) -> dict:
         "target": target,
         "claim": claim,
         "evidence": None,
-        "intended_vote": target if act in ("accuse", "lobby") else None,
+        "intended_vote": target if act in _VOTE_ACTS else None,
         "stance_changed": changed,
         "change_reason": _change_reason(ctx, act, target) if changed else None,
         "statement": statement,
@@ -398,8 +402,17 @@ def _wolf_mislead(ctx: DialogueContext, act: str, target: int, rng: random.Rando
     if act == "mediate":
         return f"{opener}，我建议统一投 {name}，别让狼人混过去。"
     if act == "analyze":
+        style = voice["style"]
         if voted_by:
             voters = "、".join(f"P{a}" for a in voted_by)
+            if style == "analytical":
+                return f"{opener}，第一，{voters} 投了 {name}；第二，这个票值得怀疑。"
+            if style == "chatty":
+                return f"{opener}，{voters} 投了 {name}，这个票我越看越觉得可疑，大家多留意。"
+            if style == "friendly":
+                return f"{opener}，{voters} 投了 {name}，可能有点问题，但我也说不好。"
+            if style == "mediating":
+                return f"{opener}，{voters} 投了 {name}，我们先把这一点弄清楚。"
             return f"{opener}，从票型看，{voters} 投了 {name}，这个票值得怀疑。"
         return f"{opener}，我怀疑 {name} 是狼，虽然目前证据不足。"
     if act == "accuse":
