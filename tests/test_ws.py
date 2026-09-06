@@ -332,6 +332,113 @@ def test_reconnect_with_bad_token_is_unauthorized() -> None:
     assert error["data"]["code"] == "unauthorized"
 
 
+def _reconnect_collect(server, conn, room_id, token, last_seq):
+    server.handle_inbound(conn, {
+        "type": "reconnect",
+        "data": {
+            "room_id": room_id,
+            "seat_id": 0,
+            "session_token": token,
+            "last_stream_seq": last_seq,
+        },
+    })
+    replayed = []
+    while True:
+        message = conn.next(timeout=15.0)
+        if message["type"] == "reconnected":
+            return replayed, message["data"]
+        replayed.append(message)
+
+
+def test_reconnect_mid_game_restores_state() -> None:
+    server = make_server()
+    conn = MemoryConnection()
+    room_id, token = create_and_join(server, conn)
+    server.handle_inbound(conn, {"type": "start", "data": {}})
+    while True:
+        message = conn.next(timeout=10.0)
+        if message["type"] == "game_started":
+            break
+
+    server.handle_disconnect(conn)
+    conn2 = MemoryConnection()
+    replayed, rec = _reconnect_collect(server, conn2, room_id, token, 0)
+    types = [m["type"] for m in replayed]
+    assert "game_started" in types
+    assert "private_event" in types  # role dealt is replayed
+    assert rec["replayed_count"] == len(replayed)
+
+
+def test_reconnect_replay_has_no_gap_or_duplicate() -> None:
+    server = make_server()
+    conn = MemoryConnection()
+    room_id, token = create_and_join(server, conn)
+    server.handle_inbound(conn, {"type": "start", "data": {}})
+    while True:
+        message = conn.next(timeout=10.0)
+        if message["type"] == "game_started":
+            break
+
+    server.handle_disconnect(conn)
+    conn2 = MemoryConnection()
+    replayed, rec = _reconnect_collect(server, conn2, room_id, token, 0)
+    seqs = [m["stream_seq"] for m in replayed if "stream_seq" in m]
+    assert seqs == list(range(1, rec["latest_stream_seq"] + 1))  # contiguous, no gap/dup
+    assert rec["replayed_count"] == len(seqs)
+
+
+def test_reconnect_while_waiting_for_action() -> None:
+    server = make_server()
+    conn = MemoryConnection()
+    room_id, token = create_and_join(server, conn)
+    server.handle_inbound(conn, {"type": "start", "data": {}})
+    while True:
+        message = conn.next(timeout=10.0)
+        if message["type"] == "decision_request":
+            break
+
+    server.handle_disconnect(conn)
+    conn2 = MemoryConnection()
+    replayed, _rec = _reconnect_collect(server, conn2, room_id, token, 0)
+    assert "decision_request" in [m["type"] for m in replayed]
+
+
+def test_reconnect_after_game_over() -> None:
+    server = make_server()
+    conn = MemoryConnection()
+    room_id, token = create_and_join(server, conn)
+    play_to_end(server, conn)
+
+    server.handle_disconnect(conn)
+    conn2 = MemoryConnection()
+    replayed, _rec = _reconnect_collect(server, conn2, room_id, token, 0)
+    assert "game_over" in [m["type"] for m in replayed]
+
+
+def test_reconnect_to_deleted_room_is_room_not_found() -> None:
+    server = make_server()
+    conn = MemoryConnection()
+    room_id, token = create_and_join(server, conn)
+    play_to_end(server, conn)
+
+    server.handle_inbound(conn, {"type": "delete", "data": {}})
+    assert conn.next()["type"] == "deleted"
+
+    conn2 = MemoryConnection()
+    server.handle_inbound(conn2, {
+        "type": "reconnect",
+        "data": {
+            "room_id": room_id,
+            "seat_id": 0,
+            "session_token": token,
+            "last_stream_seq": 0,
+        },
+    })
+    error = conn2.next()
+    assert error["type"] == "error"
+    assert error["data"]["code"] == "room_not_found"
+
+
 # ------------------------------------------------------------- timeout
 def test_decision_times_out_and_falls_back() -> None:
     server = make_server(timeouts={"vote": 0.1, "statement": 0.1, "last_words": 0.1,

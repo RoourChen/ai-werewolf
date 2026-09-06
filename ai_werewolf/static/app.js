@@ -2,6 +2,7 @@
 
 // AI狼人杀 — 最小 Web 客户端（纯静态，无构建链）。
 // 复用服务端 `/ws` 协议：建房 → 入座 → 开局 → 夜晚/讨论/投票 → 终局 → 回放。
+// 支持刷新后自动重连（sessionStorage 保存 room/seat/token/last_stream_seq）。
 
 const TARGET_KINDS = ["night_kill", "pack_confirm", "night_inspect", "vote"];
 
@@ -23,6 +24,14 @@ const PHASE_LABELS = {
 
 const ROLE_NAMES = { villager: "村民", werewolf: "狼人", seer: "预言家", witch: "女巫" };
 
+// sessionStorage keys — token 永不进入 URL / 日志 / 回放。
+const SS = {
+  room: "aiww_room_id",
+  seat: "aiww_seat_id",
+  token: "aiww_token",
+  seq: "aiww_last_stream_seq",
+};
+
 const S = {
   ws: null,
   roomId: null,
@@ -35,10 +44,30 @@ const S = {
   clientActionSeq: 0,
   countdownTimer: null,
   wantCreate: false,
+  lastStreamSeq: 0,
 };
 
 function el(id) { return document.getElementById(id); }
 function setStatus(text) { el("status").textContent = text; }
+
+function saveSession(roomId, seatId, token) {
+  sessionStorage.setItem(SS.room, roomId);
+  sessionStorage.setItem(SS.seat, String(seatId));
+  sessionStorage.setItem(SS.token, token);
+}
+
+function clearSession() {
+  Object.values(SS).forEach((k) => sessionStorage.removeItem(k));
+}
+
+function loadSession() {
+  return {
+    roomId: sessionStorage.getItem(SS.room),
+    seat: parseInt(sessionStorage.getItem(SS.seat) || "", 10),
+    token: sessionStorage.getItem(SS.token),
+    seq: parseInt(sessionStorage.getItem(SS.seq) || "0", 10),
+  };
+}
 
 function send(type, data) {
   if (!S.ws || S.ws.readyState !== WebSocket.OPEN) return;
@@ -52,15 +81,28 @@ function connect() {
   ws.onopen = () => {
     setStatus("已连接");
     if (S.wantCreate) { S.wantCreate = false; send("create_room", {}); }
+    else if (S.wantReconnect) {
+      S.wantReconnect = false;
+      send("reconnect", {
+        room_id: S.roomId,
+        seat_id: S.seat,
+        session_token: S.token,
+        last_stream_seq: S.lastStreamSeq,
+      });
+    }
   };
   ws.onmessage = (ev) => {
     try { handle(JSON.parse(ev.data)); } catch (e) { console.error(e); }
   };
-  ws.onclose = () => setStatus("连接已断开（刷新页面可重连）");
+  ws.onclose = () => setStatus("连接已断开");
 }
 
 // ---------------------------------------------------------------- handlers
 function handle(msg) {
+  if (msg.stream_seq != null) {
+    S.lastStreamSeq = Math.max(S.lastStreamSeq, msg.stream_seq);
+    sessionStorage.setItem(SS.seq, String(S.lastStreamSeq));
+  }
   const d = msg.data || {};
   switch (msg.type) {
     case "room_created": return onRoomCreated(d);
@@ -68,14 +110,16 @@ function handle(msg) {
     case "game_started": return onGameStarted(d);
     case "public_event": return onPublicEvent(d);
     case "private_event": return onPrivateEvent(d);
-    case "decision_request": return onDecision(d);
+    case "decision_request": return onDecision(d, msg.ts);
     case "action_ack": return onAck();
     case "timeout": return onTimeout(d);
     case "error": return onError(d);
     case "game_over": return onGameOver(d);
     case "replay": return onReplay(d);
     case "deleted": return onDeleted();
-    case "reconnected": addLog({ text: "已重连，补发 " + d.replayed_count + " 条" }, "private");
+    case "reconnected":
+      addLog({ text: "已恢复对局，补发 " + d.replayed_count + " 条" }, "private");
+      return undefined;
     default: return undefined;
   }
 }
@@ -90,6 +134,7 @@ function onRoomCreated(d) {
 function onJoined(d) {
   S.token = d.session_token;
   S.seat = d.seat_id;
+  saveSession(S.roomId, S.seat, S.token);
   el("start-btn").disabled = false;
   el("lobby-note").textContent = "已入座（P" + d.seat_id + "）。点击「开始游戏」。";
 }
@@ -98,6 +143,7 @@ function onGameStarted(d) {
   S.phase = d.phase || "night";
   el("lobby").hidden = true;
   el("game").hidden = false;
+  el("result").hidden = true;
   renderSeats(d.seats || []);
   renderPhase();
   const counts = d.role_counts || {};
@@ -137,12 +183,12 @@ function onPrivateEvent(d) {
   }
 }
 
-function onDecision(d) {
+function onDecision(d, ts) {
   S.currentRequest = d;
   renderPhase();
   renderDecision(d);
   renderCopilot(d);
-  startCountdown(d.deadline_ms);
+  startCountdown(d.deadline_ms, ts);
 }
 
 function onAck() {
@@ -157,6 +203,10 @@ function onTimeout(d) {
 
 function onError(d) {
   addLog({ text: "错误 [" + d.code + "] " + d.message }, "private");
+  if (d.code === "unauthorized" || d.code === "room_not_found") {
+    clearSession();
+    location.reload();
+  }
 }
 
 function onGameOver(d) {
@@ -193,10 +243,8 @@ function onReplay(d) {
 }
 
 function onDeleted() {
-  el("result").hidden = true;
-  el("lobby").hidden = false;
-  el("start-btn").disabled = true;
-  el("lobby-note").textContent = "本局已删除。";
+  clearSession();
+  location.reload();
 }
 
 // ---------------------------------------------------------------- rendering
@@ -349,13 +397,14 @@ function disclaimer() {
   return d;
 }
 
-function startCountdown(deadlineMs) {
+function startCountdown(deadlineMs, ts) {
   stopCountdown();
   const noteEl = note("");
   noteEl.className = "countdown";
   const box = el("decision");
   if (box) box.appendChild(noteEl);
-  const end = Date.now() + deadlineMs;
+  const start = ts ? Date.parse(ts) : Date.now();
+  const end = start + (deadlineMs || 0);
   S.countdownTimer = setInterval(() => {
     const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     noteEl.textContent = "剩余 " + left + " 秒";
@@ -375,10 +424,12 @@ function clearDecision(text) {
 }
 
 function submitAction(action) {
-  if (!S.currentRequest) return;
+  if (!S.currentRequest) return;  // prevent double submit
+  const request = S.currentRequest;
+  S.currentRequest = null;        // clear immediately to block re-clicks
   S.clientActionSeq += 1;
   send("action", {
-    request_id: S.currentRequest.request_id,
+    request_id: request.request_id,
     client_action_id: "web-" + S.clientActionSeq,
     kind: action.kind,
     target: action.target,
@@ -420,6 +471,11 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function exitGame() {
+  clearSession();
+  location.reload();
+}
+
 // ---------------------------------------------------------------- bootstrap
 el("create-btn").onclick = () => {
   el("create-btn").disabled = true;
@@ -431,5 +487,20 @@ el("create-btn").onclick = () => {
 };
 el("start-btn").onclick = () => send("start", { room_id: S.roomId });
 el("replay-btn").onclick = () => send("replay", { room_id: S.roomId });
+el("exit-btn").onclick = exitGame;
+el("home-btn").onclick = exitGame;
+
+// 恢复上一次会话（刷新重连）：token 只存 sessionStorage，不进 URL/日志/回放。
+const saved = loadSession();
+if (saved.roomId && saved.token && !Number.isNaN(saved.seat)) {
+  S.roomId = saved.roomId;
+  S.seat = saved.seat;
+  S.token = saved.token;
+  S.lastStreamSeq = saved.seq || 0;
+  S.wantReconnect = true;
+  el("lobby").hidden = true;
+  el("game").hidden = false;
+  el("phase").textContent = "阶段：正在恢复对局…";
+}
 
 connect();

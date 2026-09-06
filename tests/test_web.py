@@ -64,8 +64,22 @@ def test_index_html_references_client_elements() -> None:
     for element_id in (
         "status", "create-btn", "start-btn", "phase", "role", "seats",
         "decision", "log", "copilot", "result", "replay-btn", "replay",
+        "exit-btn", "home-btn",
     ):
         assert f'id="{element_id}"' in index, element_id
+
+
+def test_app_js_implements_refresh_reconnect() -> None:
+    js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    # sessionStorage persistence + auto reconnect + cleanup on errors/exit
+    assert "sessionStorage" in js
+    assert "aiww_room_id" in js and "aiww_token" in js and "aiww_last_stream_seq" in js
+    assert "reconnect" in js
+    assert "clearSession" in js
+    assert "unauthorized" in js and "room_not_found" in js
+    assert "location.reload" in js
+    # token never goes into the URL or a persistent replay
+    assert "location.href" not in js and "location.search" not in js
 
 
 def test_game_started_includes_seat_list() -> None:

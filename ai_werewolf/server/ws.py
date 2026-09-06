@@ -164,7 +164,7 @@ class _Room:
 
         self.log: list[_LogEntry] = []
         self.log_lock = threading.Lock()
-        self.stream_seq = 0
+        self.stream_seq = 1  # 1-based; 0 means "client has seen nothing"
 
         self.current_request_id: str | None = None
         self.pending_request: dict | None = None
@@ -381,22 +381,22 @@ class _Room:
 
     def reconnect(self, conn: Connection, last_stream_seq: int) -> None:
         with self.log_lock:
-            high = self.stream_seq
             replay = [
                 entry for entry in self.log
                 if entry.seq > last_stream_seq
                 and (entry.audience is None or self.seat in entry.audience)
             ]
+            high = max((entry.seq for entry in replay), default=last_stream_seq)
             self.connection = conn
             self.connected = True
             self.disconnect_at = None
             self.last_activity = self.server.now()
             for entry in replay:
                 conn.send(json.loads(json.dumps(entry.message)))
-        conn.send(_plain("reconnected", {
-            "latest_stream_seq": high,
-            "replayed_count": len(replay),
-        }))
+            conn.send(_plain("reconnected", {
+                "latest_stream_seq": high,
+                "replayed_count": len(replay),
+            }))
 
     # ------------------------------------------------------------- helpers
     def _send(self, message_type: str, data: dict, *, persistent: bool, audience: frozenset[int] | None) -> None:
