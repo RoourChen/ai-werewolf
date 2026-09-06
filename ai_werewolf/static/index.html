@@ -13,39 +13,60 @@
       <button id="mode-guided" class="active">引导模式</button>
       <button id="mode-fast">快速模式</button>
     </div>
-    <div class="status-line"><span id="status">未连接</span><span id="room-info"></span></div>
+    <div class="status-line">
+      <span id="ai-mode-badge" class="badge"></span>
+      <span id="status">未连接</span>
+      <span id="room-info"></span>
+    </div>
   </header>
 
   <main>
-    <section id="lobby" class="panel">
-      <p>1 名真人 + 6 名不同人格 AI 的 7 人局。</p>
+    <!-- 首页 -->
+    <section id="home" class="panel">
+      <div class="home-grid">
+        <div class="home-col">
+          <h2>你的经验</h2>
+          <button id="exp-new" class="active">第一次玩（引导）</button>
+          <button id="exp-vet">我会玩（快速）</button>
+        </div>
+        <div class="home-col">
+          <h2>AI 对手</h2>
+          <button id="ai-offline" class="active">离线演示 AI</button>
+          <button id="ai-real">真实 LLM</button>
+          <p id="ai-mode-note" class="muted"></p>
+        </div>
+        <div class="home-col">
+          <h2>认识六名 AI</h2>
+          <div id="persona-intro" class="persona-intro"></div>
+        </div>
+      </div>
       <button id="create-btn">创建房间并入座</button>
+    </section>
+
+    <!-- 入座等待 -->
+    <section id="lobby" class="panel" hidden>
+      <p>已入座，准备开始。</p>
       <button id="start-btn" disabled>开始游戏</button>
       <p id="lobby-note" class="muted"></p>
     </section>
 
-    <section id="game" class="game-grid" hidden>
+    <!-- 对局 -->
+    <section id="game" hidden>
       <div id="turn-banner" class="turn-banner" hidden>现在轮到你</div>
-
-      <aside id="left" class="panel">
-        <div id="phase" class="phase"></div>
-        <div id="role" class="role"></div>
-        <h3>玩家座位</h3>
-        <div id="seats"></div>
-        <button id="exit-btn" class="ghost" style="margin-top:1rem">退出本局</button>
-      </aside>
-
-      <section id="center" class="panel">
-        <div id="phase-card"></div>
-        <div id="decision"></div>
-        <div id="feed" class="feed"></div>
-      </section>
-
-      <aside id="right" class="panel">
-        <div id="copilot"></div>
-      </aside>
+      <div id="top-bar" class="top-bar"></div>
+      <div class="game-layout">
+        <div id="table" class="table"></div>
+        <aside id="right" class="panel">
+          <div id="copilot"></div>
+          <div id="private-info" class="private-info"></div>
+        </aside>
+      </div>
+      <div id="decision"></div>
+      <button id="drawer-toggle" class="ghost">完整日志（折叠）</button>
+      <div id="drawer" class="drawer" hidden><div id="feed" class="feed"></div></div>
     </section>
 
+    <!-- 终局 -->
     <section id="result" class="panel" hidden>
       <h2>对局结束</h2>
       <div id="result-body"></div>

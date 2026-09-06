@@ -35,7 +35,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ai_werewolf.ai.provider import Provider
+from ai_werewolf.ai.provider import (
+    Provider,
+    configured_model,
+    missing_real_model_vars,
+    real_model_available,
+)
 from ai_werewolf.replay.recorder import record_session
 from ai_werewolf.server.room import AIConfig, HumanSeat, RoomConfig
 from ai_werewolf.server.session import GameSession
@@ -146,10 +151,11 @@ class _LogEntry:
 class _Room:
     """State for one live room and its single human seat."""
 
-    def __init__(self, server: WsServer, room_id: str, join_secret_digest: str) -> None:
+    def __init__(self, server: WsServer, room_id: str, join_secret_digest: str, ai_mode: str = "offline") -> None:
         self.server = server
         self.room_id = room_id
         self.join_secret_digest = join_secret_digest
+        self.ai_mode = ai_mode
         self.created_at = server.now()
         self.last_activity = self.created_at
         self.finished_at: float | None = None
@@ -204,7 +210,7 @@ class _Room:
     def _build_session(self) -> GameSession:
         factory = self.server.config.provider_factory
         provider = factory(self.server.config.seed) if factory is not None else None
-        ai = AIConfig(count=6, policy="llm", provider=provider)
+        ai = AIConfig(count=6, policy="llm", provider=provider, ai_mode=self.ai_mode)
         config = RoomConfig(
             capacity=7,
             language="zh",
@@ -410,11 +416,11 @@ class _Room:
                 self.connection.send(json.loads(json.dumps(message)))
 
     def _seat_list(self) -> list[dict]:
-        """Return the public seat table (name + alive) for the web client."""
+        """Return the public seat table (name + alive + is_human) for the web client."""
         if self.session is not None and self.session.referee is not None:
             state = self.session.referee.state
             return [
-                {"id": s.id, "name": s.name, "alive": s.alive}
+                {"id": s.id, "name": s.name, "alive": s.alive, "is_human": s.is_human}
                 for s in state.seats
             ]
         return []
@@ -440,7 +446,7 @@ class WsServer:
         data = message.get("data") or {}
         try:
             if message_type == "create_room":
-                self._handle_create_room(conn)
+                self._handle_create_room(conn, data)
             elif message_type == "join":
                 self._handle_join(conn, data)
             elif message_type == "reconnect":
@@ -480,15 +486,28 @@ class WsServer:
         conn.bound_seat = None
 
     # ------------------------------------------------------------ handlers
-    def _handle_create_room(self, conn: Connection) -> None:
+    def _handle_create_room(self, conn: Connection, data: dict) -> None:
         self.sweep()
         if self._active_count() >= self.config.max_active_rooms:
             raise WsError("room_capacity_reached", "active room limit reached")
+        ai_mode = data.get("ai_mode", "offline")
+        if ai_mode not in ("offline", "real"):
+            raise WsError("server_error", f"unknown ai_mode {ai_mode!r}")
+        if ai_mode == "real" and not real_model_available():
+            missing = ", ".join(missing_real_model_vars())
+            raise WsError(
+                "provider_unavailable",
+                f"真实 LLM 未配置，缺少：{missing}；请设置 .env 后重启服务",
+            )
         room_id = uuid.uuid4().hex[:8]
         join_secret = secrets.token_urlsafe(24)
-        room = _Room(self, room_id, self._digest(join_secret))
+        room = _Room(self, room_id, self._digest(join_secret), ai_mode=ai_mode)
         self._rooms[room_id] = room
-        conn.send(_plain("room_created", {"room_id": room_id, "join_secret": join_secret}))
+        conn.send(_plain("room_created", {
+            "room_id": room_id,
+            "join_secret": join_secret,
+            "effective_ai_mode": ai_mode,
+        }))
 
     def _handle_join(self, conn: Connection, data: dict) -> None:
         room_id: Any = data.get("room_id")
@@ -679,7 +698,11 @@ def create_ws_app(server: WsServer | None = None) -> Any:
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "real_llm_available": real_model_available(),
+            "model": configured_model(),
+        }
 
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket) -> None:

@@ -70,6 +70,23 @@ NEUTRAL = Persona(
     0.50, 0.50, 0.50, 0.50, 0.50, 0.50,
 )
 
+#: First-pass speech-act priors (NOT real probabilities). These only rank
+#: situation-valid behaviours for the offline Mock dialogue generator.
+SPEECH_WEIGHTS: dict[str, dict[str, float]] = {
+    "skeptic": {"question": 0.35, "analyze": 0.25, "accuse": 0.15,
+                 "defend": 0.10, "support": 0.03, "lobby": 0.07, "mediate": 0.05},
+    "nice": {"question": 0.10, "analyze": 0.15, "accuse": 0.05,
+              "defend": 0.10, "support": 0.35, "lobby": 0.05, "mediate": 0.20},
+    "analyst": {"question": 0.10, "analyze": 0.45, "accuse": 0.12,
+                 "defend": 0.08, "support": 0.08, "lobby": 0.10, "mediate": 0.07},
+    "aggressor": {"question": 0.08, "analyze": 0.12, "accuse": 0.20,
+                   "defend": 0.10, "support": 0.03, "lobby": 0.42, "mediate": 0.05},
+    "mediator": {"question": 0.12, "analyze": 0.18, "accuse": 0.05,
+                  "defend": 0.08, "support": 0.15, "lobby": 0.07, "mediate": 0.35},
+    "chatterbox": {"question": 0.18, "analyze": 0.15, "accuse": 0.16,
+                    "defend": 0.12, "support": 0.10, "lobby": 0.20, "mediate": 0.09},
+}
+
 
 def perturb(persona: Persona, rng: random.Random) -> Persona:
     """Apply a deterministic ±0.03 jitter to every dimension, clamped to [0,1]."""

@@ -7,7 +7,6 @@ which creates and runs a :class:`~ai_werewolf.server.session.GameSession`.
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -37,23 +36,27 @@ class AIConfig:
     policy: str = "llm"  # "llm" | "random"
     model: str | None = None
     provider: Provider | None = None
+    ai_mode: str = "offline"  # "offline" (Mock) | "real" (LLM, no silent fallback)
 
     def __post_init__(self) -> None:
         if self.policy not in ("llm", "random"):
             raise ValueError(f"unknown AI policy {self.policy!r} (use 'llm' or 'random')")
+        if self.ai_mode not in ("offline", "real"):
+            raise ValueError(f"unknown ai_mode {self.ai_mode!r} (use 'offline' or 'real')")
 
     def resolve_provider(self, seed: int | None) -> Provider:
-        """Build the provider: explicit provider > model (CLI/AIConfig) > env > mock.
+        """Build the provider: explicit provider > ai_mode strict path.
 
-        Model priority is fixed: explicit ``model`` field (set by the CLI when
-        given) wins, then the ``AIWEREWOLF_MODEL`` environment variable.
+        "offline" always uses the mock (never calls a real model, even if the
+        env is configured); "real" requires a complete config and raises
+        :class:`ProviderError` instead of silently degrading.
         """
         if self.provider is not None:
             return self.provider
-        model = self.model or os.environ.get("AIWEREWOLF_MODEL", "") or None
-        if model:
-            config = ModelConfig.from_env()  # loads .env if present
-            config.model = model
+        if self.ai_mode == "real":
+            config = ModelConfig.from_env()  # raises ProviderError if incomplete
+            if self.model:
+                config.model = self.model
             return OpenAICompatProvider(config)
         return MockProvider(seed=seed or 0)
 

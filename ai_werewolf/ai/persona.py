@@ -10,6 +10,7 @@ every decision can be traced and audited.
 
 from __future__ import annotations
 
+from ai_werewolf.ai.memory import AgentMemory
 from ai_werewolf.ai.personas import Persona
 from ai_werewolf.ai.provider import Prompt
 from ai_werewolf.domain.actions import ActionKind
@@ -71,12 +72,18 @@ _LANG = {"zh": "请使用简体中文。", "en": "Please answer in English."}
 _PUBLIC_KINDS = {ActionKind.STATEMENT, ActionKind.VOTE}
 
 
-def build_prompt(view: PlayerView, request: DecisionRequest, persona: Persona) -> Prompt:
+def build_prompt(
+    view: PlayerView,
+    request: DecisionRequest,
+    persona: Persona,
+    memory: AgentMemory | None = None,
+    top_suspicion: int | None = None,
+) -> Prompt:
     l10n = L10n(view.language)
     return Prompt(
         system=_system(view, persona, l10n),
         user=_user(view, request, persona, l10n),
-        hint=_hint(view, request, persona),
+        hint=_hint(view, request, persona, memory, top_suspicion),
     )
 
 
@@ -191,7 +198,13 @@ def _reply_format(view: PlayerView, request: DecisionRequest) -> str:
     )
 
 
-def _hint(view: PlayerView, request: DecisionRequest, persona: Persona) -> dict:
+def _hint(
+    view: PlayerView,
+    request: DecisionRequest,
+    persona: Persona,
+    memory: AgentMemory | None,
+    top_suspicion: int | None,
+) -> dict:
     return {
         "kind": request.kind.value,
         "candidates": list(request.legal_targets),
@@ -200,10 +213,12 @@ def _hint(view: PlayerView, request: DecisionRequest, persona: Persona) -> dict:
         "can_poison": request.can_poison,
         "suggestions": list(request.suggestions),
         "me_role": view.my_role.value,
+        "me": view.me,
         "pack": list(view.packmates),
         "others": [pid for pid in view.living if pid != view.me],
         "public": request.kind in _PUBLIC_KINDS,
         "day": view.day,
+        "phase": view.phase.value,
         "event_ids": [e.id for e in view.events],
         "persona": persona.id,
         "trust_baseline": persona.trust_baseline,
@@ -212,7 +227,51 @@ def _hint(view: PlayerView, request: DecisionRequest, persona: Persona) -> dict:
         "lobby_strength": persona.lobby_strength,
         "vote_resistance": persona.vote_resistance,
         "deception_tendency": persona.deception_tendency,
+        # 对话上下文（供 Mock 对话生成器 + LLM 使用）
+        "living": [
+            {"id": s.id, "name": s.name, "alive": s.alive, "is_human": False}
+            for s in view.seats
+            if s.alive
+        ],
+        "recent_statements": _recent_statements(view),
+        "votes": _votes(view),
+        "top_suspicion": top_suspicion,
+        "my_last_statement": memory.last_statement if memory else None,
+        "questioned_by": _questioned_by(view),
+        "memory": memory.summarize() if memory else {},
     }
+
+
+def _recent_statements(view: PlayerView) -> list[dict]:
+    out = []
+    for e in view.events:
+        if e.kind is EventKind.STATEMENT and e.actor is not None:
+            out.append({"actor": e.actor, "day": e.day, "text": e.text})
+    return out[-10:]
+
+
+def _votes(view: PlayerView) -> list[dict]:
+    out = []
+    for e in view.events:
+        if e.kind is EventKind.VOTE and e.actor is not None and e.target is not None:
+            out.append({"day": e.day, "actor": e.actor, "target": e.target, "round": int(e.data.get("round", 1))})
+    return out
+
+
+def _questioned_by(view: PlayerView) -> list[int]:
+    """谁在发言里点名过我（引用了我的编号）——事实性的“被质疑”。"""
+    mark = f"P{view.me}"
+    out: list[int] = []
+    for e in view.events:
+        if (
+            e.kind is EventKind.STATEMENT
+            and e.actor is not None
+            and e.actor != view.me
+            and mark in e.text
+            and e.actor not in out
+        ):
+            out.append(e.actor)
+    return out[-4:]
 
 
 def _seats_block(view: PlayerView) -> str:

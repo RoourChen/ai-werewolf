@@ -48,6 +48,13 @@ class DecisionRecord:
     retried: bool = False
     pending_review: bool = False
     first_failure: str | None = None
+    # 对话结构化字段（发言类；向后兼容，默认空）
+    speech_act: str = ""
+    target: int | None = None
+    claim: str = ""
+    intended_vote: int | None = None
+    stance_changed: bool = False
+    change_reason: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "private_suspicion", MappingProxyType(dict(self.private_suspicion)))
@@ -83,6 +90,12 @@ class DecisionRecord:
             "retried": self.retried,
             "pending_review": self.pending_review,
             "first_failure": self.first_failure,
+            "speech_act": self.speech_act,
+            "target": self.target,
+            "claim": self.claim,
+            "intended_vote": self.intended_vote,
+            "stance_changed": self.stance_changed,
+            "change_reason": self.change_reason,
         }
 
 

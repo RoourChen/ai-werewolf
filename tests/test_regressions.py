@@ -207,13 +207,23 @@ def test_model_participates_in_provider_build(monkeypatch):
     monkeypatch.setenv("AIWEREWOLF_PROVIDER", "deepseek")
     monkeypatch.setenv("AIWEREWOLF_API_KEY", "k")
     monkeypatch.setenv("AIWEREWOLF_MODEL", "base-model")
-    ai = AIConfig(count=6, policy="llm", model="my-model")
+    ai = AIConfig(count=6, policy="llm", model="my-model", ai_mode="real")
     provider = ai.resolve_provider(seed=0)
     assert isinstance(provider, OpenAICompatProvider)
     assert provider.config.model == "my-model"
 
 
-def test_resolve_provider_falls_back_to_mock():
+def test_offline_mode_ignores_model_and_uses_mock(monkeypatch):
+    monkeypatch.setenv("AIWEREWOLF_PROVIDER", "deepseek")
+    monkeypatch.setenv("AIWEREWOLF_API_KEY", "k")
+    monkeypatch.setenv("AIWEREWOLF_MODEL", "base-model")
+    ai = AIConfig(count=6, policy="llm", model="my-model", ai_mode="offline")
+    assert isinstance(ai.resolve_provider(seed=0), MockProvider)
+
+
+def test_resolve_provider_falls_back_to_mock(monkeypatch):
+    for var in ("AIWEREWOLF_MODEL", "AIWEREWOLF_API_KEY", "AIWEREWOLF_BASE_URL", "AIWEREWOLF_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
     ai = AIConfig(count=6, policy="llm")
     assert isinstance(ai.resolve_provider(seed=0), MockProvider)
 

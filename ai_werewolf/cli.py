@@ -165,8 +165,9 @@ def cmd_simulate(args: argparse.Namespace) -> int:
 
 def cmd_play(args: argparse.Namespace) -> int:
     console = _console()
-    provider = build_provider(args.provider, seed=args.model_seed) if args.provider == "mock" else None
-    ai = AIConfig(count=6, policy="llm", provider=provider, model=args.model)
+    ai_mode = "real" if args.provider == "env" else "offline"
+    provider = build_provider("mock", seed=args.model_seed) if args.provider == "mock" else None
+    ai = AIConfig(count=6, policy="llm", provider=provider, model=args.model, ai_mode=ai_mode)
     room = Room(RoomConfig(
         capacity=7,
         language=args.lang,

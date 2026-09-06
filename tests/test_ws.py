@@ -593,7 +593,7 @@ def test_fastapi_adapter_runs_full_game() -> None:
     server = make_server()
     app = create_ws_app(server)
     client = TestClient(app)
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json()["status"] == "ok"
 
     with client.websocket_connect("/ws") as ws:
         ws.send_json({"type": "create_room", "data": {}})

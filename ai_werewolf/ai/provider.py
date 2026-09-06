@@ -252,6 +252,39 @@ def _percentile(values: list[float], pct: float) -> float:
     return ordered[low] + (ordered[high] - ordered[low]) * (k - low)
 
 
+def real_model_available() -> bool:
+    """Whether a complete real-model config is present in the environment."""
+    _load_dotenv(Path(".env"))
+    api_key = os.environ.get("AIWEREWOLF_API_KEY", "")
+    model = os.environ.get("AIWEREWOLF_MODEL", "")
+    base_url = os.environ.get("AIWEREWOLF_BASE_URL", "")
+    preset = os.environ.get("AIWEREWOLF_PROVIDER", "")
+    if not base_url and preset:
+        base_url = PRESETS.get(preset, "")
+    return bool(api_key and model and base_url)
+
+
+def configured_model() -> str | None:
+    """Return the configured model name (never the key or base URL)."""
+    _load_dotenv(Path(".env"))
+    return os.environ.get("AIWEREWOLF_MODEL") or None
+
+
+def missing_real_model_vars() -> list[str]:
+    """Names of missing env vars (for a clear error, never their values)."""
+    _load_dotenv(Path(".env"))
+    missing: list[str] = []
+    if not os.environ.get("AIWEREWOLF_API_KEY"):
+        missing.append("AIWEREWOLF_API_KEY")
+    if not os.environ.get("AIWEREWOLF_MODEL"):
+        missing.append("AIWEREWOLF_MODEL")
+    base_url = os.environ.get("AIWEREWOLF_BASE_URL", "")
+    preset = os.environ.get("AIWEREWOLF_PROVIDER", "")
+    if not base_url and (not preset or preset not in PRESETS):
+        missing.append("AIWEREWOLF_BASE_URL 或 AIWEREWOLF_PROVIDER")
+    return missing
+
+
 def _load_dotenv(path: Path) -> None:
     """Minimal ``.env`` loader — ``KEY=VALUE`` lines, existing vars win."""
     if not path.is_file():

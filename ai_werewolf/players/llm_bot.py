@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import json
 
+from ai_werewolf.ai.memory import AgentMemory
 from ai_werewolf.ai.persona import build_prompt
 from ai_werewolf.ai.personas import NEUTRAL, Persona
 from ai_werewolf.ai.provider import Prompt, Provider
 from ai_werewolf.domain.actions import TARGET_ACTIONS, Action, ActionKind
+from ai_werewolf.domain.events import EventKind
 from ai_werewolf.domain.roles import Role
 from ai_werewolf.domain.state import DecisionRequest, PlayerView
 from ai_werewolf.domain.trace import (
@@ -81,12 +83,13 @@ class LLMBot(Player):
         self.persona = persona or NEUTRAL
         self.trace: list[DecisionRecord] = []
         self.latest_record: DecisionRecord | None = None
+        self.memory = AgentMemory()
         self._last_private: dict[int, float] = {}
         self._last_threat: dict[int, float] = {}
         self.json_diagnostics: list[dict] = []
 
     def decide(self, view: PlayerView, request: DecisionRequest) -> Action:
-        prompt = build_prompt(view, request, self.persona)
+        prompt = build_prompt(view, request, self.persona, self.memory, self._top_suspicion())
         raw = self._call(prompt)
         data = _parse_json(raw)
         first_failure: str | None = None
@@ -118,6 +121,7 @@ class LLMBot(Player):
                         request, view, f"retry failed: {issue}", retried=True, first_failure=first_failure
                     )
         self._append(record)
+        self._remember(action, view)
         return action
 
     def _record_json_failure(self, raw: str) -> None:
@@ -155,6 +159,42 @@ class LLMBot(Player):
         self.trace.append(record)
         self.latest_record = record
 
+    def _top_suspicion(self) -> int | None:
+        if not self._last_private:
+            return None
+        return max(self._last_private, key=lambda p: self._last_private[p])
+
+    def _remember(self, action: Action, view: PlayerView) -> None:
+        if action.kind in (ActionKind.STATEMENT, ActionKind.LAST_WORDS):
+            self.memory.record_statement(action.text)
+        elif action.kind is ActionKind.VOTE:
+            self.memory.record_vote(view.day, action.target)
+        mark = f"P{self.player_id}"
+        for e in view.events:
+            if (
+                e.kind is EventKind.STATEMENT
+                and e.actor is not None
+                and e.actor != self.player_id
+                and mark in e.text
+            ):
+                self.memory.record_questioned_by(e.actor)
+
+    def _validate_dialogue(self, data: dict) -> str | None:
+        statement = str(data.get("statement", "")).strip()
+        if not statement:
+            return "empty statement"
+        if self.memory.has_recent_phrase(statement):
+            return "repeated statement"
+        if data.get("stance_changed") and not str(data.get("change_reason", "")).strip():
+            return "stance_changed without change_reason"
+        act = data.get("speech_act")
+        if act is not None and act not in (
+            "inform", "question", "reply", "analyze", "accuse",
+            "defend", "support", "lobby", "mediate", "deceive",
+        ):
+            return "invalid speech_act"
+        return None
+
     def _validate(self, request: DecisionRequest, view: PlayerView, data: dict) -> str | None:
         if request.kind in (ActionKind.BID, ActionKind.LAST_WORDS):
             return None
@@ -186,6 +226,10 @@ class LLMBot(Player):
                 status = _deception_status(data, others, private, public, view)
                 if status not in ("none", "confirmed", "pending_review"):
                     return status
+        if request.kind is ActionKind.STATEMENT:
+            issue = self._validate_dialogue(data)
+            if issue is not None:
+                return issue
         return None
 
     def _build(
@@ -258,6 +302,12 @@ class LLMBot(Player):
             retried=retried,
             pending_review=(status == "pending_review"),
             first_failure=first_failure,
+            speech_act=str(data.get("speech_act", "")),
+            target=_parse_player_id(data.get("target")),
+            claim=str(data.get("claim", "")),
+            intended_vote=_parse_player_id(data.get("intended_vote")),
+            stance_changed=bool(data.get("stance_changed")),
+            change_reason=str(data["change_reason"]) if isinstance(data.get("change_reason"), str) else None,
         )
         return record, action
 

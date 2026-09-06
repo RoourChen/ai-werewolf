@@ -44,7 +44,10 @@ def test_static_files_served() -> None:
     from fastapi.testclient import TestClient
 
     client = TestClient(create_ws_app(_server()))
-    assert client.get("/health").json() == {"status": "ok"}
+    health = client.get("/health").json()
+    assert health["status"] == "ok"
+    assert "real_llm_available" in health
+    assert "model" in health
 
     index = client.get("/")
     assert index.status_code == 200
@@ -62,43 +65,46 @@ def test_static_files_served() -> None:
 def test_index_html_references_client_elements() -> None:
     index = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
     for element_id in (
-        "status", "create-btn", "start-btn", "phase", "role", "seats",
-        "decision", "copilot", "result", "replay-btn", "replay",
-        "exit-btn", "home-btn", "again-btn",
-        "mode-guided", "mode-fast", "phase-card", "feed", "turn-banner",
-        "identity-modal", "identity-confirm", "recap",
+        "home", "create-btn", "lobby", "start-btn", "game",
+        "table", "top-bar", "decision", "drawer", "drawer-toggle", "feed",
+        "copilot", "private-info", "result", "replay-btn", "replay",
+        "again-btn", "home-btn",
+        "mode-guided", "mode-fast", "ai-offline", "ai-real", "ai-mode-badge",
+        "exp-new", "exp-vet", "persona-intro",
+        "identity-modal", "identity-confirm", "recap", "turn-banner",
     ):
         assert f'id="{element_id}"' in index, element_id
 
 
 def test_app_js_implements_guided_and_fast_modes() -> None:
     js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    # 双模式 + 默认引导 + localStorage 存模式偏好
-    assert "aiww_mode" in js
-    assert 'localStorage.getItem(LS_MODE) || "guided"' in js or "guided" in js
-    assert "setMode" in js and "flushForDecision" in js
-    # 事件播放队列 + 决策优先级（不得被队列延误）
-    assert "queue" in js and "delayFor" in js
-    assert "flushForDecision" in js
-    assert "decision_request" in js
-    # 身份卡 + 阶段卡 + 终局复盘 + 再来一局
-    assert "identityConfirmed" in js and "maybePhaseCard" in js
-    assert "renderRecap" in js and "again-btn" in js
-    # 倒计时按消息 ts 计算剩余时间
+    assert "aiww_mode" in js and "setMode" in js and "flushForDecision" in js
+    assert "queue" in js and "delayFor" in js and "decision_request" in js
+    assert "identityConfirmed" in js and "renderRecap" in js and "again-btn" in js
     assert "Date.parse(ts)" in js
+
+
+def test_app_js_implements_mode_and_round_table() -> None:
+    js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    # 模式：客户端只提交 ai_mode；服务端返回 effective_ai_mode
+    assert "ai_mode" in js and "effective_ai_mode" in js
+    assert "/health" in js and "real_llm_available" in js
+    # 圆桌 + 身份三通道分离
+    assert "renderSeats" in js and "seatCardHtml" in js and "renderTable" in js
+    assert "S.private" in js and "finalRoles" in js
+    assert "seerResults" in js and "狼队友" in js
+    # 日志抽屉默认折叠
+    assert "drawer" in js and "drawer.hidden" in js
 
 
 def test_app_js_implements_refresh_reconnect() -> None:
     js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    # sessionStorage 存会话；localStorage 只存模式（敏感信息不进 localStorage）
     assert "sessionStorage" in js
     assert "aiww_room_id" in js and "aiww_token" in js and "aiww_last_stream_seq" in js
     assert "localStorage" in js
-    assert "reconnect" in js
-    assert "clearSession" in js
+    assert "reconnect" in js and "clearSession" in js
     assert "unauthorized" in js and "room_not_found" in js
     assert "location.reload" in js
-    # token 永不进 URL
     assert "location.href" not in js and "location.search" not in js
 
 
