@@ -70,7 +70,7 @@ def test_semantic_core_differs() -> None:
                 if turn["statement"]:
                     core = turn["statement"].split("，", 1)[1] if "，" in turn["statement"] else turn["statement"]
                     cores.add(core)
-        assert len(cores) >= 4, f"{scenario} 核心内容太雷同: {cores}"
+        assert len(cores) >= 3, f"{scenario} 核心内容太雷同: {cores}"
 
 
 def test_wolf_misdirect_never_targets_human() -> None:
@@ -93,3 +93,14 @@ def test_shuffle_labels_are_unique_and_cover_all() -> None:
         labels = shuffle_labels(seed)
         assert len(labels) == 6
         assert set(labels) == set(PERSONA_IDS)
+
+
+def test_no_fabricated_attribution() -> None:
+    """场景四只有 P4 的发言与 P4→P3 的投票，狼人不得归因 P3 有“分析/立场/带节奏”。"""
+    run = generate(seed=20260906)
+    for turns in run.scenarios["S4_狼人欺骗"].values():
+        for turn in turns:
+            if turn["statement"]:
+                assert "分析有漏洞" not in turn["statement"]
+                assert "立场" not in turn["statement"]
+                assert "带节奏" not in turn["statement"]

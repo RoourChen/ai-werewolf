@@ -123,7 +123,7 @@ def generate_persona(scenario: dict, persona_id: str, seed: int) -> list[dict]:
     provider = MockProvider(seed=seed)
     turns: list[dict] = []
     my_statements: list[dict] = []
-    top_suspicion: int | None = None
+    suspicion: int | None = None
     my_last: str | None = None
 
     scripted = scenario["scripted_statements"]
@@ -132,25 +132,26 @@ def generate_persona(scenario: dict, persona_id: str, seed: int) -> list[dict]:
 
     # turn 1：初步发言
     recent1 = list(scripted[:1])
-    d1 = _call(provider, _hint(scenario, persona_id, "statement", recent1, votes, top_suspicion, my_last, qb))
-    focus = d1.get("target")
-    turns.append(_turn(d1, "statement", focus))
+    d1 = _call(provider, _hint(scenario, persona_id, "statement", recent1, votes, suspicion, my_last, qb))
+    suspicion = _suspicion_from(d1)
+    turns.append(_turn(d1, "statement", suspicion))
     my_statements.append({"actor": ME, "day": scenario["day"], "text": d1.get("statement", "")})
     my_last = d1.get("statement")
-    top_suspicion = focus
 
-    # turn 2：回应局势（加入其它玩家后续发言 + 我上一句）
+    # turn 2：回应局势
     recent2 = list(scripted) + list(my_statements)
-    d2 = _call(provider, _hint(scenario, persona_id, "statement", recent2, votes, top_suspicion, my_last, qb))
-    focus = d2.get("target")
-    turns.append(_turn(d2, "statement", focus))
+    d2 = _call(provider, _hint(scenario, persona_id, "statement", recent2, votes, suspicion, my_last, qb))
+    suspicion = _suspicion_from(d2) if _suspicion_from(d2) is not None else suspicion
+    turns.append(_turn(d2, "statement", suspicion))
     my_statements.append({"actor": ME, "day": scenario["day"], "text": d2.get("statement", "")})
     my_last = d2.get("statement")
-    top_suspicion = focus
 
-    # turn 3：投票（与当前关注对象一致）
-    d3 = _call(provider, _hint(scenario, persona_id, "vote", recent2, votes, top_suspicion, my_last, qb))
-    turns.append(_turn(d3, "vote", top_suspicion))
+    # turn 3：投票（= 当前怀疑；若之前“先观察/不强推”却现在投票，需说明）
+    d3 = _call(provider, _hint(scenario, persona_id, "vote", recent2, votes, suspicion, my_last, qb))
+    if suspicion is None:
+        suspicion = 0  # 无明确怀疑时只能投一个候选，并说明
+        d3["change_reason"] = "虽然之前保留，但当前只能在候选中投 P0"
+    turns.append(_turn(d3, "vote", suspicion))
     return turns
 
 
@@ -162,20 +163,39 @@ def _call(provider: MockProvider, hint: dict) -> dict:
     return data
 
 
-def _turn(d: dict, kind: str, focus: int | None) -> dict:
-    # 关注对象、公开怀疑、最终投票统一由同一目标推导，保证逻辑一致。
+_SUSPICIOUS_ACTS = {"accuse", "lobby", "question", "analyze"}
+
+
+def _suspicion_from(d: dict) -> int | None:
+    """只有“怀疑型”行为才产生公开怀疑对象；信息不足/支持/辩护不设怀疑。"""
+    if d.get("speech_act") in _SUSPICIOUS_ACTS:
+        return d.get("target")
+    return None
+
+
+def _turn(d: dict, kind: str, suspicion: int | None) -> dict:
     intended = d.get("intended_vote")
-    target = d.get("target") if d.get("target") is not None else focus
-    vote = intended if intended is not None else target
+    if kind == "vote":
+        vote = suspicion  # 最终投票 = 当前怀疑（不一致时需理由）
+        return {
+            "kind": kind,
+            "statement": None,
+            "speech_act": "",
+            "intended_vote": intended,
+            "stance_changed": bool(d.get("stance_changed")),
+            "change_reason": d.get("change_reason"),
+            "top_suspicion": suspicion,
+            "vote": vote,
+        }
     return {
         "kind": kind,
-        "statement": d.get("statement") if kind == "statement" else None,
+        "statement": d.get("statement"),
         "speech_act": d.get("speech_act", ""),
         "intended_vote": intended,
         "stance_changed": bool(d.get("stance_changed")),
         "change_reason": d.get("change_reason"),
-        "top_suspicion": target,
-        "vote": vote,
+        "top_suspicion": suspicion,
+        "vote": intended if intended is not None else suspicion,
     }
 
 
@@ -257,11 +277,11 @@ def render_header(run: BlindRun) -> str:
     )
 
 
-def render_questions(run: BlindRun, shuffle_seed: int) -> str:
+def render_questions(run: BlindRun, shuffle_seed: int, material_version: int) -> str:
     labels = shuffle_labels(shuffle_seed)
     label_names = {pid: chr(ord('A') + i) for i, pid in enumerate(labels)}
     parts = [
-        "# 人格盲测题（版本 " + str(shuffle_seed) + "，无答案）",
+        f"# 人格盲测题（材料版本 {material_version}，乱序组 {shuffle_seed}，无答案）",
         "",
         render_header(run),
         "",
@@ -282,11 +302,11 @@ def render_questions(run: BlindRun, shuffle_seed: int) -> str:
     return "\n".join(parts)
 
 
-def render_answers(run: BlindRun, shuffle_seed: int) -> str:
+def render_answers(run: BlindRun, shuffle_seed: int, material_version: int) -> str:
     labels = shuffle_labels(shuffle_seed)
     label_names = {pid: chr(ord('A') + i) for i, pid in enumerate(labels)}
     parts = [
-        "# 人格盲测答案与评分规则（版本 " + str(shuffle_seed) + "）",
+        f"# 人格盲测答案与评分规则（材料版本 {material_version}，乱序组 {shuffle_seed}）",
         "",
         render_header(run),
         "",

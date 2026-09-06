@@ -225,6 +225,8 @@ def _pick_target(ctx: DialogueContext, act: str) -> int | None:
             if s.actor in others_ex_me:
                 return s.actor
         return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else others_ex_me[0]
+    if act == "inform":
+        return None  # 信息不足，无明确怀疑对象
     if act == "mediate":
         return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else (_most_voted(ctx) or others_ex_me[0])
     return ctx.top_suspicion if ctx.top_suspicion in others_ex_me else others_ex_me[0]
@@ -389,25 +391,26 @@ def _wolf_mislead(ctx: DialogueContext, act: str, target: int, rng: random.Rando
     voice = _VOICE.get(ctx.persona_id, _VOICE["mediator"])
     opener = rng.choice(voice["openers"])
     name = _pname(ctx, target)
+    voted_by = [v.actor for v in ctx.votes if v.target == target]  # 真实事实：谁投了 target
+    has_stmt = any(s.actor == target for s in ctx.recent_statements)
     if act == "lobby":
         return f"{opener}，跟我投 {name}，别分散。"
     if act == "mediate":
         return f"{opener}，我建议统一投 {name}，别让狼人混过去。"
     if act == "analyze":
-        style = voice["style"]
-        if style == "analytical":
-            return f"{opener}，第一，从票型看 {name} 最可疑；第二，他的立场前后矛盾。"
-        if style == "chatty":
-            return f"{opener}，{name} 这个票型有点怪啊，我越看越觉得可疑，大家多留意一下。"
-        if style == "friendly":
-            return f"{opener}，{name} 可能有点问题，但我也说不好，先观察。"
-        if style == "mediating":
-            return f"{opener}，从票型看 {name} 最可疑，大家先别急着定，一起核一下。"
-        return f"{opener}，从票型看，{name} 最可疑。"
+        if voted_by:
+            voters = "、".join(f"P{a}" for a in voted_by)
+            return f"{opener}，从票型看，{voters} 投了 {name}，这个票值得怀疑。"
+        return f"{opener}，我怀疑 {name} 是狼，虽然目前证据不足。"
     if act == "accuse":
+        if voted_by:
+            voters = "、".join(f"P{a}" for a in voted_by)
+            return f"{opener}，{name} 被 {voters} 投过，很可疑。"
         return f"{opener}，{name} 很可疑，我怀疑是狼。"
     if act == "question":
-        return f"{opener}，{name} 你刚才的分析有点漏洞，你是不是在带节奏？"
+        if has_stmt:
+            return f"{opener}，{name} 你刚才的话有点问题，能再解释吗？"
+        return f"{opener}，{name} 我很怀疑，你怎么看？"
     return f"{opener}，{name} 值得大家多注意。"
 
 
