@@ -76,6 +76,23 @@ def test_game_started_includes_seat_list() -> None:
     seats = message["data"]["seats"]
     assert len(seats) == 7
     assert all("id" in s and "name" in s and "alive" in s for s in seats)
+    assert "phase" in message["data"]
+
+
+def test_events_carry_phase_field() -> None:
+    server = _server()
+    conn = MemoryConnection()
+    _start_room(server, conn)
+    checked = 0
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        message = conn.next(timeout=15.0)
+        if message["type"] in ("public_event", "private_event"):
+            assert "phase" in message["data"], message["type"]
+            checked += 1
+        if message["type"] == "decision_request":
+            break
+    assert checked >= 2
 
 
 def test_decision_request_includes_structured_copilot() -> None:

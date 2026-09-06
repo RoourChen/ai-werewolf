@@ -273,12 +273,14 @@ class _Room:
             self._send("game_started", {
                 "seats": self._seat_list(),
                 "role_counts": event.get("data", {}).get("role_counts"),
+                "phase": event.get("phase"),
             }, persistent=True, audience=None)
             return
         data = {
             "domain_event_id": event.get("id"),
             "kind": event.get("kind"),
             "day": event.get("day"),
+            "phase": event.get("phase"),
             "text": event.get("text"),
             "actor": event.get("actor"),
             "target": event.get("target"),
@@ -291,6 +293,7 @@ class _Room:
             "domain_event_id": None,
             "kind": "chat",
             "day": envelope.payload.get("day"),
+            "phase": "discussion",
             "text": envelope.payload.get("body"),
             "actor": envelope.payload.get("player"),
             "target": None,

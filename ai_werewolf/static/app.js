@@ -95,7 +95,7 @@ function onJoined(d) {
 }
 
 function onGameStarted(d) {
-  S.phase = "night";
+  S.phase = d.phase || "night";
   el("lobby").hidden = true;
   el("game").hidden = false;
   renderSeats(d.seats || []);
