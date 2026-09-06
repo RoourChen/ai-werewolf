@@ -80,7 +80,7 @@ SCENARIOS: dict[str, dict] = {
 def _hint(scenario: dict, persona_id: str, kind: str, recent_statements, votes, top_suspicion, my_last, questioned_by) -> dict:
     p = PERSONAS[persona_id]
     living = [{"id": 0, "name": "你", "alive": True, "is_human": True}]
-    names = ["老好人", "质疑者", "激进派", "分析家", "和事佬", "话痨"]
+    names = ["Alice", "Bob", "Carol", "Dave", "Erin"]  # 普通名字，不泄露人格
     for i, pid in enumerate([2, 3, 4, 5, 6]):
         living.append({"id": pid, "name": names[i], "alive": True, "is_human": False})
     others = [pid for pid in [0, 2, 3, 4, 5, 6] if pid != ME]
@@ -133,22 +133,24 @@ def generate_persona(scenario: dict, persona_id: str, seed: int) -> list[dict]:
     # turn 1：初步发言
     recent1 = list(scripted[:1])
     d1 = _call(provider, _hint(scenario, persona_id, "statement", recent1, votes, top_suspicion, my_last, qb))
-    turns.append(_turn(d1, "statement"))
+    focus = d1.get("target")
+    turns.append(_turn(d1, "statement", focus))
     my_statements.append({"actor": ME, "day": scenario["day"], "text": d1.get("statement", "")})
     my_last = d1.get("statement")
-    top_suspicion = _top(d1.get("private_suspicion", {})) or top_suspicion
+    top_suspicion = focus
 
     # turn 2：回应局势（加入其它玩家后续发言 + 我上一句）
     recent2 = list(scripted) + list(my_statements)
     d2 = _call(provider, _hint(scenario, persona_id, "statement", recent2, votes, top_suspicion, my_last, qb))
-    turns.append(_turn(d2, "statement"))
+    focus = d2.get("target")
+    turns.append(_turn(d2, "statement", focus))
     my_statements.append({"actor": ME, "day": scenario["day"], "text": d2.get("statement", "")})
     my_last = d2.get("statement")
-    top_suspicion = _top(d2.get("private_suspicion", {})) or top_suspicion
+    top_suspicion = focus
 
-    # turn 3：投票
+    # turn 3：投票（与当前关注对象一致）
     d3 = _call(provider, _hint(scenario, persona_id, "vote", recent2, votes, top_suspicion, my_last, qb))
-    turns.append(_turn(d3, "vote"))
+    turns.append(_turn(d3, "vote", top_suspicion))
     return turns
 
 
@@ -160,13 +162,11 @@ def _call(provider: MockProvider, hint: dict) -> dict:
     return data
 
 
-def _turn(d: dict, kind: str) -> dict:
-    priv = d.get("private_suspicion", {}) or {}
-    top = _top(priv)
+def _turn(d: dict, kind: str, focus: int | None) -> dict:
+    # 关注对象、公开怀疑、最终投票统一由同一目标推导，保证逻辑一致。
     intended = d.get("intended_vote")
-    vote = intended if intended is not None else top
-    if kind == "vote":
-        vote = d.get("choice") if d.get("choice") is not None else vote
+    target = d.get("target") if d.get("target") is not None else focus
+    vote = intended if intended is not None else target
     return {
         "kind": kind,
         "statement": d.get("statement") if kind == "statement" else None,
@@ -174,7 +174,7 @@ def _turn(d: dict, kind: str) -> dict:
         "intended_vote": intended,
         "stance_changed": bool(d.get("stance_changed")),
         "change_reason": d.get("change_reason"),
-        "top_suspicion": top,
+        "top_suspicion": target,
         "vote": vote,
     }
 

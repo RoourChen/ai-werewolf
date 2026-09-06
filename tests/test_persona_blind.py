@@ -50,17 +50,27 @@ def test_speech_acts_differ_across_personas() -> None:
         assert len(act_sets) >= 3, f"{scenario} act sets too similar: {act_sets}"
 
 
-def test_each_persona_uses_multiple_speech_acts() -> None:
-    """每个人格在四个场景里至少出现过一次非空 speech_act（有实际行为）。"""
+def test_statement_suspicion_vote_consistent() -> None:
+    """每人最终投票应与当前怀疑一致（除非有明确改口理由）。"""
     run = generate(seed=20260906)
-    for pid in PERSONA_IDS:
-        acts = [
-            turn["speech_act"]
-            for personas in run.scenarios.values()
-            for turn in personas[pid]
-            if turn["speech_act"]
-        ]
-        assert acts, f"{pid}: no speech_act recorded"
+    for personas in run.scenarios.values():
+        for turns in personas.values():
+            vote = turns[2]["vote"]
+            suspicion = turns[2]["top_suspicion"]
+            assert vote == suspicion, f"vote {vote} != suspicion {suspicion}"
+
+
+def test_semantic_core_differs() -> None:
+    """去掉开头口头禅后，核心内容不能雷同（不能只换语气词）。"""
+    run = generate(seed=20260906)
+    for scenario, personas in run.scenarios.items():
+        cores: set[str] = set()
+        for turns in personas.values():
+            for turn in turns:
+                if turn["statement"]:
+                    core = turn["statement"].split("，", 1)[1] if "，" in turn["statement"] else turn["statement"]
+                    cores.add(core)
+        assert len(cores) >= 4, f"{scenario} 核心内容太雷同: {cores}"
 
 
 def test_wolf_misdirect_never_targets_human() -> None:

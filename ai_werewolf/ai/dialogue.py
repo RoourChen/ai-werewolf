@@ -154,11 +154,11 @@ def _relevance(act: str, ctx: DialogueContext, sit: dict) -> float:
         return 0.0
     if act == "question" and not sit["has_speaker"]:
         return 0.0
-    if act == "analyze" and not (sit["has_votes"] or sit["has_contradiction"] or sit["has_speaker"]):
+    if act == "analyze" and not (sit["has_votes"] or sit["has_contradiction"]):
         return 0.0
     if act == "support" and (not sit["has_speaker"] or ctx.role == "werewolf"):
         return 0.0  # 狼人不“支持”非狼，改为误导
-    if act == "accuse" and ctx.top_suspicion is None and not sit["has_contradiction"] and not sit["has_speaker"]:
+    if act == "accuse" and ctx.top_suspicion is None and not sit["has_contradiction"]:
         return 0.0
     if act == "lobby":
         return 0.7 + 0.5 * ctx.lobby_strength
@@ -219,6 +219,8 @@ def _pick_target(ctx: DialogueContext, act: str) -> int | None:
             return sit["recent_speakers"][-1]
         return others_ex_me[0]
     if act == "question":
+        if sit["has_contradiction"] and sit["contradiction"] in others_ex_me:
+            return sit["contradiction"]  # 追问矛盾核心，而非套模板追问最近发言者
         for s in reversed(ctx.recent_statements):
             if s.actor in others_ex_me:
                 return s.actor
@@ -343,7 +345,7 @@ def _compose_line(ctx: DialogueContext, act: str, target: int | None, rng: rando
             c = sit["contradiction"]
             voted_for = [v.target for v in ctx.votes if v.actor == c]
             vtarget = _pname(ctx, voted_for[0]) if voted_for else "别人"
-            return f"{opener}，我发现 {_pname(ctx, c)} 的票和发言对不上：他嘴上说信 {vtarget}，票却投给了 {vtarget}。"
+            return _style_analyze(ctx, c, vtarget, rng)
         mv = _most_voted(ctx)
         n = sum(1 for v in ctx.votes if v.target == mv)
         if mv is not None:
@@ -364,6 +366,25 @@ def _compose_line(ctx: DialogueContext, act: str, target: int | None, rng: rando
     return f"{opener}，{name} 的票和发言对不上，我怀疑是狼。"
 
 
+def _style_analyze(ctx: DialogueContext, c: int, vtarget: str, rng: random.Random) -> str:
+    """同是“分析票型矛盾”，不同人格的推理深度与表达不同。"""
+    voice = _VOICE.get(ctx.persona_id, _VOICE["mediator"])
+    opener = rng.choice(voice["openers"])
+    cname = _pname(ctx, c)
+    style = voice["style"]
+    if style == "analytical":
+        return f"{opener}，第一，{cname} 的票和发言对不上；第二，他说过信 {vtarget}，票却投了 {vtarget}。"
+    if style == "chatty":
+        return f"{opener}，{cname} 这票和发言对不上啊，他说过信 {vtarget} 却投了 {vtarget}，而且也没解释，我先多观察两轮。"
+    if style == "friendly":
+        return f"{opener}，{cname} 可以理解，但他说信 {vtarget} 却投 {vtarget}，这里有点怪。"
+    if style == "aggressive":
+        return f"{opener}，{cname} 的票和发言对不上，别洗了。"
+    if style == "mediating":
+        return f"{opener}，{cname} 的票和发言有矛盾，我们先把这点弄清楚再投。"
+    return f"{opener}，{cname} 的票和发言对不上。"
+
+
 def _wolf_mislead(ctx: DialogueContext, act: str, target: int, rng: random.Random) -> str:
     voice = _VOICE.get(ctx.persona_id, _VOICE["mediator"])
     opener = rng.choice(voice["openers"])
@@ -373,6 +394,15 @@ def _wolf_mislead(ctx: DialogueContext, act: str, target: int, rng: random.Rando
     if act == "mediate":
         return f"{opener}，我建议统一投 {name}，别让狼人混过去。"
     if act == "analyze":
+        style = voice["style"]
+        if style == "analytical":
+            return f"{opener}，第一，从票型看 {name} 最可疑；第二，他的立场前后矛盾。"
+        if style == "chatty":
+            return f"{opener}，{name} 这个票型有点怪啊，我越看越觉得可疑，大家多留意一下。"
+        if style == "friendly":
+            return f"{opener}，{name} 可能有点问题，但我也说不好，先观察。"
+        if style == "mediating":
+            return f"{opener}，从票型看 {name} 最可疑，大家先别急着定，一起核一下。"
         return f"{opener}，从票型看，{name} 最可疑。"
     if act == "accuse":
         return f"{opener}，{name} 很可疑，我怀疑是狼。"
@@ -404,10 +434,13 @@ def _stance_changed(ctx: DialogueContext, target: int | None) -> bool:
 def _change_reason(ctx: DialogueContext, act: str, target: int | None) -> str | None:
     if target is None:
         return None
+    sit = _situation(ctx)
     if act == "analyze":
-        return f"发现 P{target} 的票和发言对不上"
+        if sit["has_contradiction"]:
+            return f"发现 P{target} 的票和发言对不上"
+        return f"重新评估 P{target} 的发言"
     if act == "accuse":
-        return f"P{target} 的票可疑"
+        return f"P{target} 的发言可疑"
     if act == "question":
         return f"想追问 P{target} 的依据"
     if act == "lobby":
