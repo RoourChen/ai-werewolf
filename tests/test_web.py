@@ -63,22 +63,42 @@ def test_index_html_references_client_elements() -> None:
     index = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
     for element_id in (
         "status", "create-btn", "start-btn", "phase", "role", "seats",
-        "decision", "log", "copilot", "result", "replay-btn", "replay",
-        "exit-btn", "home-btn",
+        "decision", "copilot", "result", "replay-btn", "replay",
+        "exit-btn", "home-btn", "again-btn",
+        "mode-guided", "mode-fast", "phase-card", "feed", "turn-banner",
+        "identity-modal", "identity-confirm", "recap",
     ):
         assert f'id="{element_id}"' in index, element_id
 
 
+def test_app_js_implements_guided_and_fast_modes() -> None:
+    js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    # 双模式 + 默认引导 + localStorage 存模式偏好
+    assert "aiww_mode" in js
+    assert 'localStorage.getItem(LS_MODE) || "guided"' in js or "guided" in js
+    assert "setMode" in js and "flushForDecision" in js
+    # 事件播放队列 + 决策优先级（不得被队列延误）
+    assert "queue" in js and "delayFor" in js
+    assert "flushForDecision" in js
+    assert "decision_request" in js
+    # 身份卡 + 阶段卡 + 终局复盘 + 再来一局
+    assert "identityConfirmed" in js and "maybePhaseCard" in js
+    assert "renderRecap" in js and "again-btn" in js
+    # 倒计时按消息 ts 计算剩余时间
+    assert "Date.parse(ts)" in js
+
+
 def test_app_js_implements_refresh_reconnect() -> None:
     js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    # sessionStorage persistence + auto reconnect + cleanup on errors/exit
+    # sessionStorage 存会话；localStorage 只存模式（敏感信息不进 localStorage）
     assert "sessionStorage" in js
     assert "aiww_room_id" in js and "aiww_token" in js and "aiww_last_stream_seq" in js
+    assert "localStorage" in js
     assert "reconnect" in js
     assert "clearSession" in js
     assert "unauthorized" in js and "room_not_found" in js
     assert "location.reload" in js
-    # token never goes into the URL or a persistent replay
+    # token 永不进 URL
     assert "location.href" not in js and "location.search" not in js
 
 

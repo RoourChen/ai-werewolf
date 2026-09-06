@@ -9,6 +9,10 @@
 <body>
   <header>
     <h1>AI狼人杀</h1>
+    <div class="mode-switch" role="group" aria-label="交互模式">
+      <button id="mode-guided" class="active">引导模式</button>
+      <button id="mode-fast">快速模式</button>
+    </div>
     <div class="status-line"><span id="status">未连接</span><span id="room-info"></span></div>
   </header>
 
@@ -21,6 +25,8 @@
     </section>
 
     <section id="game" class="game-grid" hidden>
+      <div id="turn-banner" class="turn-banner" hidden>现在轮到你</div>
+
       <aside id="left" class="panel">
         <div id="phase" class="phase"></div>
         <div id="role" class="role"></div>
@@ -30,9 +36,9 @@
       </aside>
 
       <section id="center" class="panel">
+        <div id="phase-card"></div>
         <div id="decision"></div>
-        <h3>对局日志</h3>
-        <div id="log" class="log"></div>
+        <div id="feed" class="feed"></div>
       </section>
 
       <aside id="right" class="panel">
@@ -43,11 +49,24 @@
     <section id="result" class="panel" hidden>
       <h2>对局结束</h2>
       <div id="result-body"></div>
+      <div id="recap" class="recap"></div>
       <button id="replay-btn">查看回放</button>
+      <button id="again-btn">再来一局</button>
       <button id="home-btn" class="ghost">回到大厅</button>
       <div id="replay" class="log" hidden></div>
     </section>
   </main>
+
+  <div id="identity-modal" class="modal" hidden>
+    <div class="modal-card">
+      <h2 id="identity-role"></h2>
+      <div id="identity-faction" class="identity-line"></div>
+      <div id="identity-goal" class="identity-line"></div>
+      <div id="identity-ability" class="identity-line"></div>
+      <div id="identity-mates" class="identity-line" hidden></div>
+      <button id="identity-confirm">我知道了</button>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
